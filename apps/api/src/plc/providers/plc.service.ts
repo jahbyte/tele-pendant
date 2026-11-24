@@ -239,7 +239,12 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
     for (const row of rows) {
       if (!row.trended) continue;
       const value = values[row.name];
-      if (typeof value === 'number') samples.push({ key: row.name, value });
+      if (typeof value === 'number') {
+        samples.push({ key: row.name, value });
+      } else if (typeof value === 'boolean') {
+        // Discrete/coil trends (e.g. Comms / Fault) store as 0|1.
+        samples.push({ key: row.name, value: value ? 1 : 0 });
+      }
     }
     return samples;
   }

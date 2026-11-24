@@ -33,19 +33,25 @@ describe('OpsPage', () => {
         ];
       }
       if (path === '/trends')
-        return ['hoistHeightMm', 'loadKg', 'speed', 'raw'];
-      if (path.startsWith('/trends/loadKg')) {
         return [
-          { value: 4, createdAt: new Date().toISOString() },
-          { value: 4, createdAt: new Date().toISOString() },
+          'holding.speedPct',
+          'discrete.commsOk',
+          'discrete.fault',
+          'raw',
+        ];
+      if (path.startsWith('/trends/discrete.commsOk')) {
+        return [
+          { value: 1, createdAt: new Date().toISOString() },
+          { value: 1, createdAt: new Date().toISOString() },
         ];
       }
-      if (path.startsWith('/trends/speed')) return [{ t: '1', value: 3 }];
+      if (path.startsWith('/trends/discrete.fault'))
+        return [{ t: '1', value: 0 }];
       if (path.startsWith('/trends/raw')) return { nope: true };
       if (path.startsWith('/trends/')) {
         return [
           { value: 10, createdAt: new Date().toISOString() },
-          { value: 12, createdAt: new Date().toISOString() },
+          { value: 40, createdAt: new Date().toISOString() },
         ];
       }
       return {
@@ -58,8 +64,8 @@ describe('OpsPage', () => {
     renderWithProviders(<OpsPage />, { role: 'supervisor' });
     await waitFor(() => expect(screen.getByText(/E-Stop/)).toBeInTheDocument());
     expect(screen.getByText(/Last error: timeout/)).toBeInTheDocument();
-    expect(await screen.findByText(/12 mm/)).toBeInTheDocument();
-    expect(screen.getByText(/loadKg: 4/)).toBeInTheDocument();
+    expect(await screen.findByText(/40 %/)).toBeInTheDocument();
+    expect(screen.getByText(/discrete.commsOk: 1/)).toBeInTheDocument();
     expect(screen.getByText(/shelved/)).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Ack' })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Ack' }));

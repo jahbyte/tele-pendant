@@ -32,9 +32,14 @@ describe('HmiSeedService', () => {
     };
     const registers = {
       findOne: jest.fn().mockResolvedValue(null),
-      find: jest
-        .fn()
-        .mockResolvedValue([{ name: 'holding.hoistHeightMm', trended: true }]),
+      find: jest.fn().mockResolvedValue([
+        { name: 'holding.hoistHeightMm', trended: true },
+        { name: 'holding.loadKg', trended: true },
+        { name: 'holding.trolleyPosition', trended: true },
+        { name: 'holding.speedPct', trended: false },
+        { name: 'discrete.commsOk', trended: false },
+        { name: 'discrete.fault', trended: false },
+      ]),
       save: jest.fn(async (row: unknown) => ({
         id: 'reg',
         ...(row as object),
@@ -57,6 +62,13 @@ describe('HmiSeedService', () => {
       save: jest.fn(),
       create: jest.fn((row: unknown) => row),
     };
+    const trendSamples = {
+      createQueryBuilder: jest.fn(() => ({
+        delete: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue(undefined),
+      })),
+    };
 
     const service = new HmiSeedService(
       registers as never,
@@ -64,8 +76,9 @@ describe('HmiSeedService', () => {
       backgrounds as never,
       overlays as never,
       roles as never,
+      trendSamples as never,
     );
-    return { service, cells, backgrounds, overlays, registers };
+    return { service, cells, backgrounds, overlays, registers, trendSamples };
   }
 
   it('seeds when the database has no cells', async () => {
@@ -216,5 +229,37 @@ describe('HmiSeedService', () => {
 
     expect(install).not.toHaveBeenCalled();
     expect(overlays.save).not.toHaveBeenCalled();
+  });
+
+  it('replaces crane trend flags with P03A21 Speed/Comms/Fault and purges samples', async () => {
+    const { service, registers, trendSamples } = makeService({
+      cellCount: 12,
+      selectorCount: 3,
+      activeBg: { name: 'demo-p03a21', active: true },
+    });
+    const hoist = { name: 'holding.hoistHeightMm', trended: true };
+    const load = { name: 'holding.loadKg', trended: true };
+    const trolley = { name: 'holding.trolleyPosition', trended: true };
+    const speed = { name: 'holding.speedPct', trended: false };
+    const comms = { name: 'discrete.commsOk', trended: false };
+    const fault = { name: 'discrete.fault', trended: false };
+    registers.find.mockResolvedValue([
+      hoist,
+      load,
+      trolley,
+      speed,
+      comms,
+      fault,
+    ]);
+
+    await service.onModuleInit();
+
+    expect(hoist.trended).toBe(false);
+    expect(load.trended).toBe(false);
+    expect(trolley.trended).toBe(false);
+    expect(speed.trended).toBe(true);
+    expect(comms.trended).toBe(true);
+    expect(fault.trended).toBe(true);
+    expect(trendSamples.createQueryBuilder).toHaveBeenCalled();
   });
 });

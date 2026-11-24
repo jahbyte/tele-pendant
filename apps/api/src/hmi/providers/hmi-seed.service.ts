@@ -16,6 +16,21 @@ import { hmiAssetPublicPath, hmiAssetsDirectory } from '../hmi-assets';
 import { OverlayLabel } from '../../overlays/entities/overlay-label.entity';
 import { RegisterMap } from '../../registers/entities/register-map.entity';
 import { SafetyRoles } from '../../safety/entities/safety-roles.entity';
+import { TrendSample } from '../../trends/entities/trend-sample.entity';
+
+/** Crane demo series — cleared so Ops Trends never shows hoist/load/trolley. */
+const LEGACY_CRANE_TREND_KEYS = [
+  'holding.hoistHeightMm',
+  'holding.loadKg',
+  'holding.trolleyPosition',
+] as const;
+
+/** P03A21 plant-label series (Speed / Comms / Fault overlays). */
+const P03A21_SAMPLE_TREND_KEYS = [
+  'holding.speedPct',
+  'discrete.commsOk',
+  'discrete.fault',
+] as const;
 
 /** Seeded plant drawing file name under /hmi-assets. */
 const DEMO_PLANT_ASSET = 'demo-p03a21.svg';
@@ -93,6 +108,8 @@ export class HmiSeedService implements OnModuleInit {
     private readonly overlays: Repository<OverlayLabel>,
     @InjectRepository(SafetyRoles)
     private readonly roles: Repository<SafetyRoles>,
+    @InjectRepository(TrendSample)
+    private readonly trendSamples: Repository<TrendSample>,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -426,20 +443,32 @@ export class HmiSeedService implements OnModuleInit {
     return row;
   }
 
-  /** A database with no trend flags gets the three simulator series. */
+  /**
+   * Ops Trends for the welding pendant: Speed / Comms / Fault.
+   * Clears leftover crane hoist/load/trolley trend flags and samples.
+   */
   private async ensureSampleTrends(): Promise<void> {
     const rows = await this.registers.find();
-    if (rows.some((row) => row.trended)) return;
-    for (const name of [
-      'holding.hoistHeightMm',
-      'holding.loadKg',
-      'holding.trolleyPosition',
-    ]) {
-      const row = rows.find((item) => item.name === name);
-      if (!row) continue;
-      row.trended = true;
-      await this.registers.save(row);
+    const legacy = new Set<string>(LEGACY_CRANE_TREND_KEYS);
+    const next = new Set<string>(P03A21_SAMPLE_TREND_KEYS);
+    for (const row of rows) {
+      if (legacy.has(row.name) && row.trended) {
+        row.trended = false;
+        await this.registers.save(row);
+        continue;
+      }
+      if (next.has(row.name) && !row.trended) {
+        row.trended = true;
+        await this.registers.save(row);
+      }
     }
+    await this.trendSamples
+      .createQueryBuilder()
+      .delete()
+      .where('series_key IN (:...keys)', {
+        keys: [...LEGACY_CRANE_TREND_KEYS],
+      })
+      .execute();
   }
 
   private async ensureSafetyRoles(): Promise<void> {

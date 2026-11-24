@@ -8,6 +8,7 @@ import { PlcModule } from '../plc/plc.module';
 import { RegisterMap } from '../registers/entities/register-map.entity';
 import { SafetyRoles } from '../safety/entities/safety-roles.entity';
 import { SafetyModule } from '../safety/safety.module';
+import { TrendSample } from '../trends/entities/trend-sample.entity';
 import { UsersModule } from '../users/users.module';
 import { HmiController } from './hmi.controller';
 import { HmiSeedService } from './providers/hmi-seed.service';
@@ -21,6 +22,7 @@ import { HmiService } from './providers/hmi.service';
       BackgroundDisplay,
       OverlayLabel,
       SafetyRoles,
+      TrendSample,
     ]),
     forwardRef(() => PlcModule),
     SafetyModule,

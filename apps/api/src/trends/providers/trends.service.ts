@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
+import { RegisterMap } from '../../registers/entities/register-map.entity';
 import { TrendSample } from '../entities/trend-sample.entity';
 
 @Injectable()
@@ -8,6 +9,8 @@ export class TrendsService {
   constructor(
     @InjectRepository(TrendSample)
     private readonly samples: Repository<TrendSample>,
+    @InjectRepository(RegisterMap)
+    private readonly registers: Repository<RegisterMap>,
   ) {}
 
   async record(seriesKey: string, value: number): Promise<void> {
@@ -24,9 +27,13 @@ export class TrendsService {
     }
   }
 
+  /** Series marked Trend in Config — not leftover historical sample keys. */
   async keys(): Promise<string[]> {
-    const rows = await this.samples.find();
-    return [...new Set(rows.map((row) => row.seriesKey))];
+    const rows = await this.registers.find({
+      where: { trended: true },
+      order: { name: 'ASC' },
+    });
+    return rows.map((row) => row.name);
   }
 
   async series(seriesKey: string, minutes = 15) {

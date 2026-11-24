@@ -265,11 +265,7 @@ function TrendChart({ seriesKey }: { seriesKey: string }) {
     })
     .join(' ');
   const last = values[values.length - 1];
-  const unit = /mm/i.test(seriesKey)
-    ? ' mm'
-    : /kg/i.test(seriesKey)
-      ? ' kg'
-      : '';
+  const unit = /speedPct/i.test(seriesKey) ? ' %' : '';
   return (
     <figure>
       <figcaption className="mb-1 text-sm">
