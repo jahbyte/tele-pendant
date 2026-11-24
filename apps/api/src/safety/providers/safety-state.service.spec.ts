@@ -41,7 +41,7 @@ describe('SafetyStateService', () => {
   let service: SafetyStateService;
   let controlLease: ControlLeaseService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
     jest.useRealTimers();
     driver.isConnected.mockReturnValue(true);
@@ -67,6 +67,13 @@ describe('SafetyStateService', () => {
       safeActionPin as never,
       controlLease,
     );
+    // Finish the startup clear so later ticks do not re-drop coils by default.
+    await service.onModuleInit();
+    driver.writeCoil.mockClear();
+    driver.writeRegister.mockClear();
+    auditService.write.mockClear();
+    roles.save.mockClear();
+    cells.find.mockClear();
   });
 
   function clientFor(userId: string): string {
@@ -691,6 +698,147 @@ describe('SafetyStateService', () => {
   it('leaves STOP clear on boot when the latch row is empty', async () => {
     await service.onModuleInit();
     expect(service.snapshot().eStopActive).toBe(false);
+  });
+
+  it('clears motion, Enable, and deadman outputs on startup', async () => {
+    cells.find.mockImplementation(
+      async (query?: { where?: { isMotion?: boolean } }) => {
+        if (query?.where?.isMotion) {
+          return [
+            {
+              isMotion: true,
+              primaryRegister: { kind: 'coil', address: 26 },
+              secondaryRegister: { kind: 'coil', address: 27 },
+            },
+          ];
+        }
+        return [
+          {
+            isMotion: false,
+            style: 'enable',
+            label: 'Enable',
+            primaryRegister: { kind: 'coil', address: 43 },
+          },
+          {
+            isMotion: false,
+            style: 'estop',
+            label: 'STOP',
+            requiresSafeAction: true,
+            primaryRegister: { kind: 'coil', address: 11 },
+          },
+        ];
+      },
+    );
+    driver.writeCoil.mockClear();
+    const fresh = new SafetyStateService(
+      plcService as never,
+      auditService as never,
+      cells as never,
+      registers as never,
+      roles as never,
+      safeActionPin as never,
+      new ControlLeaseService(),
+    );
+    await fresh.onModuleInit();
+    expect(driver.writeCoil).toHaveBeenCalledWith(26, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(27, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(10, false);
+    expect(driver.writeCoil).not.toHaveBeenCalledWith(11, false);
+    expect(fresh.snapshot().mode).toBe('normal');
+    expect(fresh.snapshot().deadmanActive).toBe(false);
+  });
+
+  it('retries startup output clear on the first connected tick', async () => {
+    cells.find.mockImplementation(
+      async (query?: { where?: { isMotion?: boolean } }) => {
+        if (query?.where?.isMotion) {
+          return [
+            {
+              isMotion: true,
+              primaryRegister: { kind: 'coil', address: 26 },
+            },
+          ];
+        }
+        return [
+          {
+            isMotion: false,
+            style: 'enable',
+            label: 'Enable',
+            primaryRegister: { kind: 'coil', address: 43 },
+          },
+        ];
+      },
+    );
+    driver.isConnected.mockReturnValue(false);
+    const fresh = new SafetyStateService(
+      plcService as never,
+      auditService as never,
+      cells as never,
+      registers as never,
+      roles as never,
+      safeActionPin as never,
+      new ControlLeaseService(),
+    );
+    await fresh.onModuleInit();
+    expect(driver.writeCoil).not.toHaveBeenCalled();
+
+    driver.isConnected.mockReturnValue(true);
+    driver.writeCoil.mockClear();
+    await fresh.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(26, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(10, false);
+    expect(fresh.snapshot().mode).toBe('normal');
+  });
+
+  it('keeps retrying startup clear when the first write fails', async () => {
+    cells.find.mockResolvedValue([
+      {
+        isMotion: true,
+        primaryRegister: { kind: 'coil', address: 26 },
+      },
+    ]);
+    driver.writeCoil
+      .mockRejectedValueOnce(new Error('link down'))
+      .mockRejectedValueOnce('link down')
+      .mockResolvedValue(undefined);
+    const fresh = new SafetyStateService(
+      plcService as never,
+      auditService as never,
+      cells as never,
+      registers as never,
+      roles as never,
+      safeActionPin as never,
+      new ControlLeaseService(),
+    );
+    await fresh.onModuleInit();
+    cells.find.mockImplementation(
+      async (query?: { where?: { isMotion?: boolean } }) => {
+        if (query?.where?.isMotion) {
+          return [
+            {
+              isMotion: true,
+              primaryRegister: { kind: 'coil', address: 26 },
+            },
+          ];
+        }
+        return [
+          {
+            isMotion: false,
+            style: 'enable',
+            label: 'Enable',
+            primaryRegister: { kind: 'coil', address: 43 },
+          },
+        ];
+      },
+    );
+    await fresh.tick();
+    driver.writeCoil.mockClear();
+    await fresh.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(26, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(10, false);
   });
 
   it('skips a latch write when the row is already latched', async () => {

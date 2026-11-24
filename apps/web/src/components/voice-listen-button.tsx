@@ -64,10 +64,8 @@ export function VoiceListenButton() {
   }, []);
 
   const stopDeadmanHold = useCallback(() => {
-    if (deadmanPulseRef.current != null) {
-      window.clearInterval(deadmanPulseRef.current);
-      deadmanPulseRef.current = null;
-    }
+    window.clearInterval(deadmanPulseRef.current ?? undefined);
+    deadmanPulseRef.current = null;
     deadmanHoldUntilRef.current = 0;
     releaseDeadman();
   }, [releaseDeadman]);
@@ -138,7 +136,14 @@ export function VoiceListenButton() {
     recognition.maxAlternatives = 5;
     recognition.lang = 'en-US';
     let sent = false;
+    let listenTimer: number | null = null;
+    const clearListenTimer = () => {
+      if (listenTimer == null) return;
+      window.clearTimeout(listenTimer);
+      listenTimer = null;
+    };
     const done = () => {
+      clearListenTimer();
       endVoiceKeepEnable();
       setListening(false);
     };
@@ -158,6 +163,7 @@ export function VoiceListenButton() {
       if (sent) return;
       if (last?.isFinal === false) return;
       if (!heard) {
+        sent = true;
         recognition.stop();
         stopDeadmanHold();
         done();
@@ -183,22 +189,25 @@ export function VoiceListenButton() {
     };
     recognition.onend = () => {
       if (!sent) {
+        sent = true;
         stopDeadmanHold();
         done();
         toastErr(t('nothingHeard'));
         return;
       }
+      clearListenTimer();
       setListening(false);
     };
     setListening(true);
     recognition.start();
-    window.setTimeout(() => {
+    listenTimer = window.setTimeout(() => {
+      listenTimer = null;
       recognition.stop();
-      setListening(false);
-      if (!sent) {
-        stopDeadmanHold();
-        endVoiceKeepEnable();
-      }
+      if (sent) return;
+      sent = true;
+      stopDeadmanHold();
+      done();
+      toastErr(t('nothingHeard'));
     }, 8000);
   }
 

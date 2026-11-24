@@ -284,13 +284,51 @@ describe('VoiceListenButton', () => {
     await waitFor(() =>
       expect(toastMocks.err).toHaveBeenCalledWith('Nothing heard'),
     );
+    // Late browser events after stop(); deadman interval already cleared.
+    instances[0]!.onerror?.({ error: 'no-speech' });
+    instances[0]!.onend?.();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Listen' })).toBeEnabled(),
+    );
 
     toastMocks.err.mockClear();
     socket.emit.mockClear();
     pressMic();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Listening…' })).toBeDisabled(),
+    );
     await vi.advanceTimersByTimeAsync(8100);
     expect(instances[instances.length - 1]!.stop).toHaveBeenCalled();
     expect(socket.emit).toHaveBeenCalledWith('deadman.release');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Listen' })).toBeEnabled(),
+    );
+
+    // Timeout while a command is already in flight must only stop recognition.
+    let finishVoice!: (value: unknown) => void;
+    vi.spyOn(api, 'apiPost').mockImplementation(async (path: string) => {
+      if (path === '/media/voice') {
+        return new Promise((resolve) => {
+          finishVoice = resolve;
+        });
+      }
+      return { ok: true };
+    });
+    pressMic();
+    const active = instances[instances.length - 1]!;
+    active.onresult?.({
+      results: [
+        Object.assign([{ transcript: 'stop' }], { isFinal: true }),
+      ] as unknown as ArrayLike<{ transcript: string } & { isFinal?: boolean }>,
+    });
+    await waitFor(() => expect(api.apiPost).toHaveBeenCalled());
+    active.stop = vi.fn();
+    await vi.advanceTimersByTimeAsync(8100);
+    expect(active.stop).toHaveBeenCalled();
+    finishVoice!({ ok: true, label: 'STOP' });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Listen' })).toBeEnabled(),
+    );
     vi.useRealTimers();
   });
 

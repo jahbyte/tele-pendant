@@ -56,6 +56,11 @@ export class SafetyStateService implements OnModuleInit {
   private deadmanHolderSocketId: string | null = null;
   /** After release/timeout: keep retrying PLC drop until deadman+motion coils are cleared. */
   private needsMotionDrop = false;
+  /**
+   * After API restart: keep retrying until motion, Enable/command, and deadman
+   * coils are written false (in-memory hold state is gone but PLC may still be ON).
+   */
+  private needsBootOutputClear = true;
   /** Bumped on pulse so an in-flight coil-drop cannot clear after a newer hold. */
   private dropGeneration = 0;
   /** Avoid rewriting deadman=true every 250ms while the hold is already asserted. */
@@ -94,11 +99,41 @@ export class SafetyStateService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
+    this.needsBootOutputClear = true;
+    await this.clearOutputsAfterRestart();
     const existing = await this.roles.find({ take: 1 });
     if (!existing[0]?.operatorEStopLatched) return;
     this.latchPersisted = true;
     this.eStopActive = true;
     await this.enterMode('e_stop', 'Software e-stop still latched');
+  }
+
+  /**
+   * Drop leftover PLC outputs after an API restart. In-memory deadman/motion
+   * state is empty, but coils can still be high from the previous process.
+   */
+  private async clearOutputsAfterRestart(): Promise<void> {
+    if (!this.needsBootOutputClear) return;
+    const driver = this.plcService.getDriver();
+    if (!driver.isConnected()) return;
+    try {
+      await this.clearMotionCoils();
+      await this.clearCommandCoils();
+      const deadman = await this.roleAddress(
+        'deadmanRegisterId',
+        'coil.deadman',
+        DEMO_CRANE_MAP.coils.deadman,
+      );
+      await driver.writeCoil(deadman, false);
+      this.deadmanCoilHigh = false;
+      this.needsBootOutputClear = false;
+      this.logger.log(
+        'Cleared motion, Enable/command, and deadman outputs on startup',
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Startup output clear failed (will retry): ${message}`);
+    }
   }
 
   async getRoles(): Promise<SafetyRoles> {
@@ -548,6 +583,8 @@ export class SafetyStateService implements OnModuleInit {
       if (this.eStopActive && !wasLatched) {
         await this.persistEStopLatch(true);
       }
+      // Clear leftover motion/Enable/deadman before re-asserting anything.
+      await this.clearOutputsAfterRestart();
       if (coilHigh) {
         await this.enterMode('e_stop', 'E-stop coil asserted');
         return this.snapshot();
