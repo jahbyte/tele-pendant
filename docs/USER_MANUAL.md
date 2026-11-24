@@ -110,16 +110,16 @@ Click **Media** in the top nav (or open http://localhost:8080/media).
 - Camera card explains that the QR must match a **registered code** text (Chrome uses the built-in detector; Safari and Firefox use ZXing on the live frame).
 - Section **Device camera** with **Scan QR / barcode in frame**. If the camera is blocked, a red alert and **Reload page** appear (same pattern as Face). Scan feedback appears under the buttons (success or error).
 - Section **Manual / known codes**. Supervisors and admins see a link to **Add or edit codes in Config**.
-- Code field already contains `TP-CRANE-DEMO-01`, button **Resolve**.
+- Code field already contains `TP-P03A21`, button **Resolve**.
 - Two code buttons:
-  - **TP-CRANE-DEMO-01**: Demo crane bay A
+  - **TP-P03A21**: P03A21 Operator
   - **TP-OPS**: Ops dashboard
 - Section **Voice commands** with **Listen (8s)** only (no UP/DOWN tap buttons). Saying **up** or **down** runs a short timed hoist only after an admin enables **Allow timed media motion** under Config **Safety roles** and saves, and only while deadman is held (Listen pulses deadman while active). **stop** still commands a stop without a PIN.
 
-### 6a. Resolve the crane code
+### 6a. Resolve the Operator code
 
-1. Click **Resolve** (field still `TP-CRANE-DEMO-01`).
-2. **Success:** the app navigates to **/operator**. That code’s route is the operator screen.
+1. Click **Resolve** (field still `TP-P03A21`).
+2. **Success:** the app navigates to **/operator**. That code’s route is the Operator (P03A21) screen.
 
 Go back with the browser Back button, or open http://localhost:8080/media again.
 
@@ -136,19 +136,19 @@ Return to **Media** via the address bar http://localhost:8080/media (the ops pag
 2. Click **Resolve**.
 3. **Success:** you stay on Media and see a red alert that includes **Unknown code** (under the camera and manual sections).
 
-Put `TP-CRANE-DEMO-01` back in the field if you want.
+Put `TP-P03A21` back in the field if you want.
 
 ### 6d. Scan button
 
 1. Click **Scan QR / barcode in frame** (a spinner shows while decoding).
 2. **Success in this desktop browser (no QR in front of the camera):** a red alert such as **No code in frame; hold a registered QR steady and try again.** If the camera is blocked, a red alert tells you to allow Camera in the browser’s site settings (lock/controls icon in the address bar), then **Reload page**.
-3. **Success with a demo QR:** encode plain text **TP-CRANE-DEMO-01** (not a random URL). After scan or **Resolve**, you see **Resolved: Demo crane bay A (TP-CRANE-DEMO-01)** and the app opens **Operator** when that code’s route is set.
+3. **Success with a demo QR:** encode plain text **TP-P03A21** (not a random URL). After scan or **Resolve**, you see **Resolved: P03A21 Operator (TP-P03A21)** and the app opens **Operator** when that code’s route is set.
 
 ### 6d-b. Manage codes (supervisor / admin)
 
 1. Open **Config** → **QR / scan codes**.
 2. Edit an existing row or use **Add code** (payload, label, optional **Open screen after scan**).
-3. **Success:** the new code appears in the list and on **Media** under known codes; scanning or resolving it behaves like the demo codes.
+3. **Success:** the new code appears in the list and on **Media** under known codes; scanning or resolving it behaves like the seed codes.
 
 ### 6e. Voice
 

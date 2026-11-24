@@ -165,8 +165,7 @@ export function MediaScreen({ token }: { token: string }) {
         <>
           <Section>{t('qrTitle')}</Section>
           <Hint>
-            Type a known code (demo: TP-CRANE-DEMO-01) or pick one below, then
-            Resolve.
+            Type a known code (e.g. TP-P03A21) or pick one below, then Resolve.
           </Hint>
           <Field label="Code" value={code} onChangeText={setCode} />
           <Btn disabled={!code.trim()} onPress={() => void resolve(code)}>

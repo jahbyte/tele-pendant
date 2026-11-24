@@ -2,6 +2,9 @@ import {
   AssistantService,
   loadCursorSdk,
   manualSentence,
+  nameTokens,
+  questionTokens,
+  sharesLiveToken,
 } from './assistant.service';
 import {
   mkdtempSync,
@@ -122,6 +125,7 @@ describe('AssistantService', () => {
           values: {
             'holding.loadKg': 0,
             'coil.eStop': false,
+            'holding.hoistHeightMm': 1250,
           },
         }),
       } as never,
@@ -132,6 +136,68 @@ describe('AssistantService', () => {
     expect(result.answer).toContain('Active alarms: Fixture load clear.');
     expect(result.answer).toContain('holding.loadKg=0');
     expect(result.answer).toContain('coil.eStop=false');
+    expect(result.answer).not.toContain('holding.hoistHeightMm');
+  });
+
+  it('does not append hoistHeightMm just because the question contains "the"', async () => {
+    const live = new AssistantService(
+      configService as never,
+      { listActive: async () => [] } as never,
+      {
+        latest: () => ({
+          values: {
+            'holding.hoistHeightMm': 1250,
+            'holding.loadKg': 0,
+          },
+        }),
+      } as never,
+    );
+    live.onModuleInit();
+    const result = await live.ask('How does the deadman work?');
+    expect(result.answer).not.toContain('holding.hoistHeightMm');
+    expect(result.answer).not.toContain('Current tags:');
+    expect(result.answer).not.toContain('1250');
+  });
+
+  it('still names hoist height when the question asks about height', async () => {
+    const live = new AssistantService(
+      configService as never,
+      { listActive: async () => [] } as never,
+      {
+        latest: () => ({
+          values: { 'holding.hoistHeightMm': 1250 },
+        }),
+      } as never,
+    );
+    live.onModuleInit();
+    const result = await live.ask('What is the hoist height?');
+    expect(result.answer).toContain('holding.hoistHeightMm=1250');
+  });
+
+  it('tokenizes live names and questions without substring false hits', () => {
+    expect(nameTokens('holding.hoistHeightMm').sort()).toEqual(
+      ['height', 'hoist', 'hoistheightmm', 'holding'].sort(),
+    );
+    expect(nameTokens('coil.eStop').sort()).toEqual(
+      ['coil', 'estop', 'stop'].sort(),
+    );
+    expect(nameTokens('.holding..XMLParser.').sort()).toEqual(
+      ['holding', 'parser', 'xml', 'xmlparser'].sort(),
+    );
+    expect(nameTokens('ab.mm')).toEqual([]);
+    expect(questionTokens('How does the deadman work?')).toEqual(['deadman']);
+    expect(questionTokens('the how what')).toEqual([]);
+    expect(
+      sharesLiveToken('How does the deadman work?', 'holding.hoistHeightMm'),
+    ).toBe(false);
+    expect(sharesLiveToken('the how what', 'holding.hoistHeightMm')).toBe(
+      false,
+    );
+    expect(
+      sharesLiveToken('What is the hoist height?', 'holding.hoistHeightMm'),
+    ).toBe(true);
+    expect(sharesLiveToken('fixture load estop', 'coil.eStop')).toBe(true);
+    expect(sharesLiveToken('old tip', 'holding.hoistHeightMm')).toBe(false);
   });
 
   it('says alarms and tags are unavailable when those reads throw', async () => {
@@ -173,6 +239,12 @@ describe('AssistantService', () => {
     expect(manualSentence('no period here')).toBe('no period here');
     expect(manualSentence('Motion cells require an active [deadman] .')).toBe(
       'Motion cells require an active deadman.',
+    );
+    expect(
+      manualSentence('\uFFFDThe field is labeled ** Reset PIN**. More after.'),
+    ).toBe('The field is labeled Reset PIN.');
+    expect(manualSentence('…The field is labeled **Reset PIN**.')).toBe(
+      'The field is labeled Reset PIN.',
     );
   });
 

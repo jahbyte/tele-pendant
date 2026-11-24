@@ -80,7 +80,7 @@ describe('ConfigScanCodesSection', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save A/i }));
     await waitFor(() => expect(patch).toHaveBeenCalled());
 
-    const payloadInputs = screen.getAllByPlaceholderText('TP-CRANE-DEMO-01');
+    const payloadInputs = screen.getAllByPlaceholderText('TP-P03A21');
     fireEvent.change(payloadInputs[payloadInputs.length - 1]!, {
       target: { value: 'NEW-CODE' },
     });

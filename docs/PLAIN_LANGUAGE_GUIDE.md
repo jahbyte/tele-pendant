@@ -53,7 +53,7 @@ Think of it as: **sign in → see a picture of the plant → press buttons / roc
 | **Trend** | Store history of a number over time (e.g. hoist height) and draw a simple chart on Ops. |
 | **Live labels / overlays** | Text boxes on the plant picture (Height, Load, Motor) that update from the PLC. |
 | **Control matrix / cells** | The grid of buttons (Hoist Up, STOP, etc.). Each **cell** sits in a row/column and points at PLC registers. |
-| **QR / barcode** | Scannable codes that jump you to a screen (e.g. crane operator view). |
+| **QR / barcode** | Scannable codes that jump you to a screen (e.g. Operator / P03A21). |
 | **Voice command** | Say **up** or **down** (allowlisted words) to run hoist briefly; demo convenience. |
 | **OTA** | Over-the-air update for the **phone app’s JavaScript** without reinstalling from the store (still needs native rebuild for camera changes). |
 | **Audit** | A log of who changed settings or triggered important actions. |
@@ -168,8 +168,8 @@ Default demo layout (empty corners):
 | Control | What it does |
 | ------- | ------------ |
 | **Device camera** | Shows live video; **Scan QR / barcode in frame** tries to read a code from the image. Needs camera permission. |
-| **Manual code field + Resolve** | Type a known code (demo: `TP-CRANE-DEMO-01`) and jump to the linked screen. |
-| **Code shortcut buttons** | Same as Resolve for preset codes (crane → Operator, `TP-OPS` → Ops). |
+| **Manual code field + Resolve** | Type a known code (e.g. `TP-P03A21`) and jump to the linked screen. |
+| **Code shortcut buttons** | Same as Resolve for preset codes (`TP-P03A21` → Operator, `TP-OPS` → Ops). |
 | **Listen (8s)** | Browser or device speech recognition. Say allowlisted words. **up** / **down** run a ~2 s timed hoist only when **Allow timed media motion** is checked in Config **Safety roles** and saved (off by default). Listen pulses deadman while active so timed voice cannot move without a hold (TP-29). No separate UP/DOWN tap buttons on Media. |
 
 **Plant CCTV later:** The Media screen uses the device camera. An administrator can connect a plant camera on the server. The screen then says **Plant camera configured**.
@@ -391,7 +391,7 @@ Always follow your site’s real safety program. Software STOP is not a substitu
 | See why motion failed | Operator | Read red error + banner mode |
 | Check connection | Ops | **PLC connected**, **Safety mode** |
 | Clear alarm from my list | Ops | **Ack** or **Shelve** |
-| Jump to crane screen | Media | Resolve `TP-CRANE-DEMO-01` |
+| Jump to Operator screen | Media | Resolve `TP-P03A21` |
 | Change button text | Config | Edit cell label → Save |
 | Point at real PLC | Config | New connection → **Use this PLC** → Save |
 | Change language | Login | Language menu → English, Spanish, French, or German |

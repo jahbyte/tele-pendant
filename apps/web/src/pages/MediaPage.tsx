@@ -31,7 +31,7 @@ export function MediaPage() {
   } | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
   const mayEditCodes = isSupervisorOrAdmin();
-  const [manualCode, setManualCode] = useState('TP-CRANE-DEMO-01');
+  const [manualCode, setManualCode] = useState('TP-P03A21');
   const canResolveManual = manualCode.trim().length > 0;
 
   const camera = useQuery({
@@ -222,7 +222,7 @@ export function MediaPage() {
             <CardHeader>
               <CardTitle>Manual / known codes</CardTitle>
               <CardDescription>
-                Demo payloads: <strong>TP-CRANE-DEMO-01</strong>,{' '}
+                Known payloads: <strong>TP-P03A21</strong>,{' '}
                 <strong>TP-OPS</strong>.
                 {mayEditCodes ? (
                   <>

@@ -73,7 +73,7 @@ From-zero setup, using your keys and URLs: [`docs/FROM_ZERO.md`](./docs/FROM_ZER
 - Native mobile (handover): signed `.apk`, `.aab`, and `.ipa` are **not in git**; vendor sends installables and signing keys securely. Rebuild with `pnpm handover:mobile` (APK + AAB + iOS) or `handover:mobile:apk` / `:aab` / `:ios` (see [`docs/MOBILE_RELEASE.md`](./docs/MOBILE_RELEASE.md))
 - Default admin: `admin@example.com` / `change-me-admin-password` (from `.env`); admins manage operator/supervisor accounts in Config **Users**; all roles change login password via the web **Account menu** or phone drawer
 - Safe-action PIN (reset e-stop only, not login): `SAFE_ACTION_PIN`
-- Seed QR: `TP-CRANE-DEMO-01`
+- Seed QR: `TP-P03A21`
 - Face auth: local challenge liveness (not ISO-certified) — [`docs/FACE_LIMITATIONS.md`](./docs/FACE_LIMITATIONS.md)
 - Assistant: **acceptance = local SQLite FTS** (Cursor Agent only if `CURSOR_API_KEY` is set)
 - Drivers: [`docs/DRIVERS.md`](./docs/DRIVERS.md) · Scope checklist: [`docs/SCOPE_ACCEPTANCE.md`](./docs/SCOPE_ACCEPTANCE.md)

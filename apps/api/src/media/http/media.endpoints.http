@@ -12,7 +12,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "code": "TP-CRANE-DEMO-01"
+  "code": "TP-P03A21"
 }
 
 ### Voice command

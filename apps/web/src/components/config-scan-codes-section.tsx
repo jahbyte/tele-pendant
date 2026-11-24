@@ -122,7 +122,7 @@ function ScanCodeEditor({
             id={`${initial.code}-payload`}
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="TP-CRANE-DEMO-01"
+            placeholder="TP-P03A21"
           />
           <p className="text-xs text-muted-foreground">
             Exact text inside the QR (not a URL unless you register that URL).

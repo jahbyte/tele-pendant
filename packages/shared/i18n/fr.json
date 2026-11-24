@@ -141,7 +141,7 @@
   "tour.operator.matrix": "Maintenez les boutons de mouvement. STOP est une pression, sans PIN.",
   "tour.operator.holdHint": "Maintenez pour bouger. Relâchez pour arrêter.",
   "tour.media.camera": "Aperçu caméra. Autorisez pour scanner les QR.",
-  "tour.media.qr": "Saisissez ou scannez un code (ex. TP-CRANE-DEMO-01).",
+  "tour.media.qr": "Saisissez ou scannez un code (ex. TP-P03A21).",
   "tour.header.voice": "Micro en-tête : maintenez Enable sur Operator, puis dites stop, owva up/down ou d’autres boutons P03A21.",
   "tour.media.voice": "Voix téléphone : dites stop, owva up/down, move home. Maintenez Enable sur Operator pour jogger.",
   "tour.ops.diagnostics": "Lien PLC, mode sécurité, watchdog, uptime API.",

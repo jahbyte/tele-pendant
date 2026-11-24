@@ -376,17 +376,7 @@ export class AssistantService implements OnModuleInit {
   }
 
   private sharesQuestionWord(question: string, name: string): boolean {
-    const words = question
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((word) => word.length > 2);
-    const parts = name
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((part) => part.length > 2);
-    return parts.some((part) =>
-      words.some((word) => part.includes(word) || word.includes(part)),
-    );
+    return sharesLiveToken(question, name);
   }
 
   /** Alarms and tags that share a word with the question. Failures stay visible. */
@@ -516,14 +506,131 @@ export class AssistantService implements OnModuleInit {
   }
 }
 
-/** One manual sentence, without the brackets full-text search wraps around a hit. */
+/**
+ * One manual sentence from an FTS snippet: drop highlight brackets, markdown,
+ * and leading ellipsis/replacement junk (e.g. "…The field is labeled **Reset PIN**.").
+ */
 export function manualSentence(snippet: string): string {
   const clean = snippet
     .replace(/[[\]]/g, ' ')
+    .replace(/\*{1,2}/g, '')
+    .replace(/[_`#]/g, ' ')
+    .replace(/[\u2026\uFFFD]+/g, ' ')
+    .replace(/\.{3,}/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/\s+([.!?])/g, '$1')
+    .trim()
+    .replace(/^[\s.*\-–—]+/, '')
     .trim();
   const end = clean.search(/[.!?](?:\s|$)/);
   if (end < 0) return clean;
   return clean.slice(0, end + 1).trim();
+}
+
+/** Skip filler so "the" cannot substring-match tag tokens like hoistHeightMm. */
+const LIVE_STOP = new Set([
+  'how',
+  'does',
+  'what',
+  'the',
+  'a',
+  'an',
+  'is',
+  'are',
+  'do',
+  'to',
+  'of',
+  'in',
+  'on',
+  'for',
+  'with',
+  'and',
+  'or',
+  'work',
+  'works',
+  'please',
+  'tell',
+  'me',
+  'about',
+  'this',
+  'that',
+  'can',
+  'you',
+  'my',
+  'our',
+  'any',
+  'when',
+  'where',
+  'why',
+  'who',
+  'which',
+  'from',
+  'into',
+  'over',
+  'under',
+  'have',
+  'has',
+  'had',
+  'been',
+  'will',
+  'would',
+  'should',
+  'could',
+  'just',
+  'also',
+  'only',
+  'than',
+  'then',
+  'them',
+  'they',
+  'their',
+  'there',
+  'here',
+  'your',
+  'not',
+  'but',
+  'out',
+  'all',
+  'get',
+  'got',
+  'see',
+  'show',
+  'need',
+  'know',
+]);
+
+export function questionTokens(question: string): string[] {
+  return question
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2 && !LIVE_STOP.has(word));
+}
+
+/**
+ * Exact tokens from a tag/alarm name: dotted segments plus camelCase parts.
+ * Avoids substring false hits (e.g. "the" inside hoistHeightMm).
+ */
+export function nameTokens(name: string): string[] {
+  const out = new Set<string>();
+  for (const segment of name.split(/[^a-zA-Z0-9]+/)) {
+    if (!segment) continue;
+    const lower = segment.toLowerCase();
+    if (lower.length > 2) out.add(lower);
+    const spaced = segment
+      .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+    for (const part of spaced.split(/\s+/)) {
+      const token = part.toLowerCase();
+      if (token.length > 2) out.add(token);
+    }
+  }
+  return [...out];
+}
+
+/** True when question and live name share an exact meaningful token. */
+export function sharesLiveToken(question: string, name: string): boolean {
+  const words = questionTokens(question);
+  if (words.length === 0) return false;
+  const parts = nameTokens(name);
+  return parts.some((part) => words.includes(part));
 }

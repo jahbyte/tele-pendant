@@ -41,22 +41,43 @@ export class MediaService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
-    if ((await this.codes.count()) > 0) return;
-    await this.codes.save([
-      this.codes.create({
-        code: 'TP-CRANE-DEMO-01',
-        label: 'Demo crane bay A',
-        kind: 'asset',
-        routeHint: '/operator',
-        notes: 'Seed QR for simulator acceptance tests',
-      }),
-      this.codes.create({
-        code: 'TP-OPS',
-        label: 'Ops dashboard',
-        kind: 'shortcut',
-        routeHint: '/ops',
-      }),
-    ]);
+    if ((await this.codes.count()) === 0) {
+      await this.codes.save([
+        this.codes.create({
+          code: 'TP-P03A21',
+          label: 'P03A21 Operator',
+          kind: 'asset',
+          routeHint: '/operator',
+          notes: 'Seed QR for Operator (P03A21 pendant layout)',
+        }),
+        this.codes.create({
+          code: 'TP-OPS',
+          label: 'Ops dashboard',
+          kind: 'shortcut',
+          routeHint: '/ops',
+        }),
+      ]);
+      return;
+    }
+    await this.retargetLegacyCraneSeed();
+  }
+
+  /** Replace leftover demo-crane seed with the P03A21 Operator code. */
+  private async retargetLegacyCraneSeed(): Promise<void> {
+    const legacy = await this.codes.findOne({
+      where: { code: 'TP-CRANE-DEMO-01' },
+    });
+    if (!legacy) return;
+    const taken = await this.codes.findOne({ where: { code: 'TP-P03A21' } });
+    if (taken) {
+      await this.codes.remove(legacy);
+      return;
+    }
+    legacy.code = 'TP-P03A21';
+    legacy.label = 'P03A21 Operator';
+    legacy.routeHint = legacy.routeHint || '/operator';
+    legacy.notes = 'Seed QR for Operator (P03A21 pendant layout)';
+    await this.codes.save(legacy);
   }
 
   async resolveCode(code: string) {

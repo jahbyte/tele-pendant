@@ -2,12 +2,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class SaveScanCodeDto {
-  @ApiProperty({ example: 'TP-CRANE-DEMO-01' })
+  @ApiProperty({ example: 'TP-P03A21' })
   @IsString()
   @MinLength(1)
   code!: string;
 
-  @ApiProperty({ example: 'Demo crane bay A' })
+  @ApiProperty({ example: 'P03A21 Operator' })
   @IsString()
   @MinLength(1)
   label!: string;

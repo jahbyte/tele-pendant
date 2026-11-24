@@ -12,7 +12,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
     useNavigate: () => navigateMock,
   };
 });
-const zxingState = vi.hoisted(() => ({ mode: 'TP-CRANE-DEMO-01' }));
+const zxingState = vi.hoisted(() => ({ mode: 'TP-P03A21' }));
 const cameraOverride = vi.hoisted(() => ({
   impl: null as
     | null
@@ -53,7 +53,7 @@ describe('MediaPage', () => {
   beforeEach(() => {
     cameraOverride.impl = null;
     navigateMock.mockClear();
-    zxingState.mode = 'TP-CRANE-DEMO-01';
+    zxingState.mode = 'TP-P03A21';
     delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
     toastMocks.ok.mockClear();
     toastMocks.err.mockClear();
@@ -73,11 +73,13 @@ describe('MediaPage', () => {
           notes: 'Device camera notes',
         };
       }
-      return [{ code: 'TP-CRANE-DEMO-01', label: 'Bay', routeHint: '/ops' }];
+      return [
+        { code: 'TP-P03A21', label: 'P03A21 Operator', routeHint: '/operator' },
+      ];
     });
     vi.spyOn(api, 'apiPost').mockResolvedValue({
-      code: 'TP-CRANE-DEMO-01',
-      label: 'Bay',
+      code: 'TP-P03A21',
+      label: 'P03A21 Operator',
       routeHint: null,
     });
   });
@@ -122,7 +124,7 @@ describe('MediaPage', () => {
 
   it('resolves codes and scans barcodes', async () => {
     class FakeDetector {
-      detect = vi.fn().mockResolvedValue([{ rawValue: 'TP-CRANE-DEMO-01' }]);
+      detect = vi.fn().mockResolvedValue([{ rawValue: 'TP-P03A21' }]);
     }
     (
       window as unknown as { BarcodeDetector: typeof FakeDetector }
@@ -131,8 +133,8 @@ describe('MediaPage', () => {
     const post = vi.spyOn(api, 'apiPost').mockImplementation(async (path) => {
       if (path === '/media/codes/resolve') {
         return {
-          code: 'TP-CRANE-DEMO-01',
-          label: 'Bay',
+          code: 'TP-P03A21',
+          label: 'P03A21 Operator',
           routeHint: null,
         };
       }
@@ -143,23 +145,25 @@ describe('MediaPage', () => {
     expect(await screen.findByText(/Device camera notes/)).toBeInTheDocument();
     expect(screen.getByText(/Plant camera configured/)).toBeInTheDocument();
 
-    const codeInput = screen.getByDisplayValue('TP-CRANE-DEMO-01');
+    const codeInput = screen.getByDisplayValue('TP-P03A21');
     fireEvent.change(codeInput, { target: { value: 'TP-CUSTOM' } });
     expect(codeInput).toHaveValue('TP-CUSTOM');
-    fireEvent.change(codeInput, { target: { value: 'TP-CRANE-DEMO-01' } });
+    fireEvent.change(codeInput, { target: { value: 'TP-P03A21' } });
     fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/media/codes/resolve', {
-        code: 'TP-CRANE-DEMO-01',
+        code: 'TP-P03A21',
       }),
     );
-    await waitFor(() => expect(toastMocks.ok).toHaveBeenCalledWith('Bay'));
+    await waitFor(() =>
+      expect(toastMocks.ok).toHaveBeenCalledWith('P03A21 Operator'),
+    );
     expect(
-      screen.getAllByText(/Resolved: Bay \(TP-CRANE-DEMO-01\)/).length,
+      screen.getAllByText(/Resolved: P03A21 Operator \(TP-P03A21\)/).length,
     ).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'TP-CRANE-DEMO-01' }));
+    fireEvent.click(screen.getByRole('button', { name: 'TP-P03A21' }));
     fireEvent.click(
       screen.getByRole('button', { name: 'Scan QR / barcode in frame' }),
     );
@@ -194,7 +198,7 @@ describe('MediaPage', () => {
     fireEvent.change(screen.getByLabelText('Code'), { target: { value: '' } });
     expect(screen.getByRole('button', { name: 'Resolve' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Code'), {
-      target: { value: 'TP-CRANE-DEMO-01' },
+      target: { value: 'TP-P03A21' },
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
@@ -394,7 +398,7 @@ describe('MediaPage', () => {
 
   it('decodes with zxing when BarcodeDetector is missing', async () => {
     delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
-    zxingState.mode = 'TP-CRANE-DEMO-01';
+    zxingState.mode = 'TP-P03A21';
     renderWithProviders(<MediaPage />);
     await screen.findByText(/Device camera notes/);
     const video = document.querySelector('video');

@@ -77,12 +77,49 @@ describe('MediaService', () => {
     else process.env.CAMERA_RTSP_URL = prevRtsp;
   });
 
-  it('seeds QR codes when empty and skips when present', async () => {
+  it('seeds QR codes when empty and retargets legacy crane seed', async () => {
+    codes.findOne.mockResolvedValue(null);
     await service.onModuleInit();
     expect(codes.save).not.toHaveBeenCalled();
+
     codes.count.mockResolvedValue(0);
     await service.onModuleInit();
-    expect(codes.save).toHaveBeenCalled();
+    expect(codes.save).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'TP-P03A21',
+          label: 'P03A21 Operator',
+        }),
+        expect.objectContaining({ code: 'TP-OPS' }),
+      ]),
+    );
+
+    codes.count.mockResolvedValue(1);
+    codes.save.mockClear();
+    codes.remove.mockClear();
+    const legacy = {
+      code: 'TP-CRANE-DEMO-01',
+      label: 'Demo crane bay A',
+      routeHint: null as string | null,
+      notes: 'old',
+    };
+    codes.findOne.mockResolvedValueOnce(legacy).mockResolvedValueOnce(null);
+    await service.onModuleInit();
+    expect(codes.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'TP-P03A21',
+        label: 'P03A21 Operator',
+        routeHint: '/operator',
+      }),
+    );
+
+    codes.save.mockClear();
+    codes.findOne
+      .mockResolvedValueOnce({ ...legacy, routeHint: '/operator' })
+      .mockResolvedValueOnce({ code: 'TP-P03A21' });
+    await service.onModuleInit();
+    expect(codes.remove).toHaveBeenCalled();
+    expect(codes.save).not.toHaveBeenCalled();
   });
 
   it('creates, updates, and deletes scan codes', async () => {
@@ -136,9 +173,9 @@ describe('MediaService', () => {
   });
 
   it('resolves known codes and lists them', async () => {
-    codes.findOne.mockResolvedValue({ code: 'TP-CRANE-DEMO-01' });
-    await expect(service.resolveCode('  TP-CRANE-DEMO-01  ')).resolves.toEqual(
-      expect.objectContaining({ code: 'TP-CRANE-DEMO-01' }),
+    codes.findOne.mockResolvedValue({ code: 'TP-P03A21' });
+    await expect(service.resolveCode('  TP-P03A21  ')).resolves.toEqual(
+      expect.objectContaining({ code: 'TP-P03A21' }),
     );
     codes.findOne.mockResolvedValue(null);
     await expect(service.resolveCode('NOPE')).rejects.toBeInstanceOf(
