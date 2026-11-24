@@ -273,6 +273,46 @@ export class HmiService {
     return saved;
   }
 
+  /**
+   * Remove an inactive screen and its buttons/labels.
+   * Activate another screen first if this one is the shared default.
+   */
+  async deleteBackground(id: string, actor?: Actor): Promise<{ ok: true }> {
+    const row = await this.backgrounds.findOneBy({ id });
+    if (!row) throw new NotFoundException('Background not found');
+    if (row.active) {
+      throw new BadRequestException(
+        'Activate another screen before deleting the active screen',
+      );
+    }
+    const count = await this.backgrounds.count();
+    if (count <= 1) {
+      throw new BadRequestException('The last plant screen cannot be deleted');
+    }
+    await this.cells
+      .createQueryBuilder()
+      .delete()
+      .where('background_id = :id', { id })
+      .execute();
+    await this.overlays
+      .createQueryBuilder()
+      .delete()
+      .where('background_id = :id', { id })
+      .execute();
+    await this.backgrounds.remove(row);
+    for (const [device, screenId] of this.screenByClient) {
+      if (screenId === id) this.screenByClient.delete(device);
+    }
+    await this.auditService.write({
+      ...this.actorFields(actor),
+      action: 'background.delete',
+      resource: id,
+      details: row.name,
+      result: 'success',
+    });
+    return { ok: true };
+  }
+
   /** Picture, buttons, and labels. The copy stays inactive. STOP is shared. */
   async copyBackground(id: string, actor?: Actor): Promise<BackgroundDisplay> {
     const source = await this.backgrounds.findOneBy({ id });

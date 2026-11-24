@@ -11,6 +11,7 @@ This guide does not include a sample machine drawing. Upload the drawing you alr
 3. Choose Edit on that screen. Editing does not change the shared default.
 4. Add the picture, buttons, and labels on that screen. Copy duplicates a screen’s picture, buttons, and labels onto a new inactive screen.
 5. Open Operator. The button grid for the new screen is empty until you add cells on that screen. Choose the screen there. That choice is for this device. Activate, for an admin, sets the shared default.
+6. Delete removes an inactive screen and its buttons/labels on that screen. Activate another screen first if the one you want to remove is the shared default. The last remaining screen cannot be deleted.
 
 ## Upload a PDF
 

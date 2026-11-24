@@ -340,7 +340,7 @@ export class AlarmEngineService implements OnModuleInit {
   }
 
   async ack(id: string, actor?: AuditActor) {
-    const event = await this.events.findOneByOrFail({ id });
+    const event = await this.requireEvent(id);
     event.state = 'acked';
     event.ackedAt = new Date();
     const saved = await this.events.save(event);
@@ -354,7 +354,7 @@ export class AlarmEngineService implements OnModuleInit {
   }
 
   async shelve(id: string, actor?: AuditActor) {
-    const event = await this.events.findOneByOrFail({ id });
+    const event = await this.requireEvent(id);
     event.state = 'shelved';
     const saved = await this.events.save(event);
     await this.auditService.write({
@@ -367,7 +367,7 @@ export class AlarmEngineService implements OnModuleInit {
   }
 
   async unshelve(id: string, actor?: AuditActor) {
-    const event = await this.events.findOneByOrFail({ id });
+    const event = await this.requireEvent(id);
     if (event.state !== 'shelved') {
       throw new BadRequestException('Alarm is not shelved');
     }
@@ -381,6 +381,15 @@ export class AlarmEngineService implements OnModuleInit {
       result: 'success',
     });
     return saved;
+  }
+
+  private async requireEvent(id: string) {
+    const event = await this.events.findOne({
+      where: { id },
+      relations: { definition: true },
+    });
+    if (!event) throw new NotFoundException('Alarm event not found');
+    return event;
   }
 
   async evaluate(): Promise<void> {

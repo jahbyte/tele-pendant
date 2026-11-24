@@ -189,6 +189,19 @@ export class HmiController {
     return this.hmiService.copyBackground(id, this.actor(req));
   }
 
+  @Delete('backgrounds/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPERVISOR)
+  @ApiOperation({
+    summary:
+      'Delete an inactive plant screen (and its buttons/labels). Activate another screen first if it is the default.',
+  })
+  deleteBackground(
+    @Param('id') id: string,
+    @Req() req: Request & { user: JwtPayload },
+  ) {
+    return this.hmiService.deleteBackground(id, this.actor(req));
+  }
+
   @Post('backgrounds/:id/activate')
   @Roles(UserRole.ADMIN)
   @ApiOperation({

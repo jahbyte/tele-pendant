@@ -46,6 +46,7 @@ describe('HmiService', () => {
       ...row,
     })),
     delete: jest.fn().mockResolvedValue(undefined),
+    createQueryBuilder: jest.fn(),
   };
   const registers = {
     find: jest.fn().mockResolvedValue([{ name: 'coil.hoistUp' }]),
@@ -60,8 +61,10 @@ describe('HmiService', () => {
       .mockResolvedValue([{ id: 'bg1', name: 'demo-crane', active: true }]),
     findOne: jest.fn().mockResolvedValue({ id: 'bg1', active: true }),
     findOneBy: jest.fn(),
+    count: jest.fn().mockResolvedValue(1),
     create: jest.fn((row: Record<string, unknown>) => ({ ...row })),
     save: jest.fn(async (row: { id: string } | Array<{ id: string }>) => row),
+    remove: jest.fn(async (row: unknown) => row),
   };
   const overlays = {
     find: jest.fn().mockResolvedValue([{ id: 'o1', text: 'H' }]),
@@ -72,6 +75,7 @@ describe('HmiService', () => {
       ...row,
     })),
     delete: jest.fn().mockResolvedValue(undefined),
+    createQueryBuilder: jest.fn(),
   };
   const plcService = {
     writeCoil: jest.fn().mockResolvedValue(undefined),
@@ -1804,6 +1808,71 @@ describe('HmiService', () => {
         yPct: null,
         primaryRegister: null,
       }),
+    );
+  });
+
+  it('deletes an inactive screen and rejects active or missing ones', async () => {
+    const inactive = { id: 'bg2', name: 'yard', active: false };
+    const cellsQb = {
+      delete: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const overlaysQb = {
+      delete: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    cells.createQueryBuilder = jest.fn(() => cellsQb);
+    overlays.createQueryBuilder = jest.fn(() => overlaysQb);
+    backgrounds.findOneBy.mockResolvedValue(inactive);
+    backgrounds.count.mockResolvedValue(2);
+    backgrounds.remove.mockResolvedValue(inactive);
+    await service.selectBackground('bg2', 'device-a');
+    backgrounds.findOneBy.mockResolvedValue({
+      id: 'bg1',
+      name: 'demo',
+      active: true,
+    });
+    await service.selectBackground('bg1', 'device-b');
+    backgrounds.findOneBy.mockResolvedValue(inactive);
+    await expect(
+      service.deleteBackground('bg2', { userEmail: 'a@b.c' }),
+    ).resolves.toEqual({ ok: true });
+    expect(cellsQb.where).toHaveBeenCalledWith('background_id = :id', {
+      id: 'bg2',
+    });
+    expect(overlaysQb.where).toHaveBeenCalledWith('background_id = :id', {
+      id: 'bg2',
+    });
+    expect(backgrounds.remove).toHaveBeenCalledWith(inactive);
+    expect(auditService.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'background.delete',
+        resource: 'bg2',
+        details: 'yard',
+      }),
+    );
+    backgrounds.findOneBy.mockResolvedValue({
+      id: 'bg1',
+      name: 'demo',
+      active: true,
+    });
+    await expect(service.deleteBackground('bg1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    backgrounds.findOneBy.mockResolvedValue(null);
+    await expect(service.deleteBackground('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    backgrounds.findOneBy.mockResolvedValue({
+      id: 'only',
+      name: 'solo',
+      active: false,
+    });
+    backgrounds.count.mockResolvedValue(1);
+    await expect(service.deleteBackground('only')).rejects.toBeInstanceOf(
+      BadRequestException,
     );
   });
 

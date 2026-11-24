@@ -201,9 +201,16 @@ export class TagPollerService implements OnModuleInit, OnModuleDestroy {
       await this.alarms.evaluate();
       this.tick += 1;
     } catch (err) {
-      this.logger.debug(
-        `poll error: ${err instanceof Error ? err.message : 'unknown'}`,
-      );
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' &&
+              err !== null &&
+              'message' in err &&
+              typeof err.message === 'string'
+            ? (err as { message: string }).message
+            : String(err);
+      this.logger.debug(`poll error: ${message}`);
     } finally {
       this.inFlight = false;
     }

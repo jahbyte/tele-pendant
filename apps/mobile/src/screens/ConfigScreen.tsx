@@ -497,6 +497,21 @@ export function ConfigScreen({ token }: { token: string }) {
                 showErrorFrom(err, 'Activate failed');
               }
             }}
+            onDelete={async (id, name) => {
+              const ok = await confirmDestructive(
+                'Delete screen?',
+                `Permanently delete ${name}? Its buttons and labels on that screen are removed. This cannot be undone.`,
+              );
+              if (!ok) return;
+              try {
+                await apiDelete(`/hmi/backgrounds/${id}`, token);
+                if (editScreenId === id) setEditScreenId(null);
+                await refreshLayout();
+                remember('background-screens', 'Screen deleted.');
+              } catch (err) {
+                showErrorFrom(err, 'Delete failed');
+              }
+            }}
             onCreate={async (name) => {
               try {
                 await apiPost('/hmi/backgrounds', { name }, token);
@@ -1581,6 +1596,7 @@ function BackgroundScreens({
   onEdit,
   onCopy,
   onActivate,
+  onDelete,
   onCreate,
 }: {
   screens: Array<{ id: string; name: string; active: boolean }>;
@@ -1590,6 +1606,7 @@ function BackgroundScreens({
   onEdit: (id: string) => void;
   onCopy: (id: string) => Promise<void>;
   onActivate: (id: string) => Promise<void>;
+  onDelete: (id: string, name: string) => Promise<void>;
   onCreate: (name: string) => Promise<void>;
 }) {
   const [newName, setNewName] = useState('');
@@ -1601,7 +1618,7 @@ function BackgroundScreens({
       {screens.map((screen) => (
         <View
           key={screen.id}
-          className="flex-row items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+          className="flex-row flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
         >
           <Text className="flex-1 text-sm text-foreground">
             {screen.name}
@@ -1627,6 +1644,15 @@ function BackgroundScreens({
               onPress={() => void onActivate(screen.id)}
             >
               <Text className="text-sm text-foreground">Activate</Text>
+            </Pressable>
+          ) : null}
+          {!screen.active ? (
+            <Pressable
+              accessibilityLabel={`Delete ${screen.name}`}
+              className="min-h-[44px] justify-center rounded-md border border-border px-3"
+              onPress={() => void onDelete(screen.id, screen.name)}
+            >
+              <Text className="text-sm text-destructive">Delete</Text>
             </Pressable>
           ) : null}
         </View>

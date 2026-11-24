@@ -1434,12 +1434,30 @@ describe('AdminPage', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Copy' })[0]);
     await screen.findByText('copy failed');
 
+    const del = vi.spyOn(api, 'apiDelete').mockResolvedValue({});
+    fireEvent.click(await screen.findByLabelText('Delete yard'));
+    await screen.findByRole('alertdialog');
+    confirmDeleteDialog();
+    await screen.findByText('Screen deleted.');
+    expect(del).toHaveBeenCalledWith('/hmi/backgrounds/bg2');
+
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith('/hmi/layout?screenId=bg2'),
     );
-    await screen.findByLabelText('new screen name');
+    await screen.findByRole('button', { name: 'Editing' });
+    fireEvent.click(await screen.findByLabelText('Delete yard'));
+    await screen.findByRole('alertdialog');
+    confirmDeleteDialog();
+    await screen.findByText('Screen deleted.');
 
+    del.mockRejectedValueOnce(new Error('in use'));
+    fireEvent.click(await screen.findByLabelText('Delete yard'));
+    await screen.findByRole('alertdialog');
+    confirmDeleteDialog();
+    await screen.findByText('in use');
+
+    await screen.findByLabelText('new screen name');
     fireEvent.change(screen.getByLabelText('new screen name'), {
       target: { value: 'dock' },
     });

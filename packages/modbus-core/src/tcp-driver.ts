@@ -88,12 +88,16 @@ export class TcpModbusDriver implements ModbusDriver {
     this.requestTimeoutMs = timeoutMs;
 
     const useTls = options.tls?.enabled === true;
+    /** jsmodbus listens for `connect` in its constructor — attach the client before connecting. */
     let socket: net.Socket | tls.TLSSocket;
+    let client: InstanceType<typeof Modbus.client.TCP>;
 
     try {
-      socket = useTls
-        ? await this.connectTls(options, timeoutMs)
-        : await this.connectPlain(options, timeoutMs);
+      if (useTls) {
+        ({ socket, client } = await this.openTls(options, timeoutMs));
+      } else {
+        ({ socket, client } = await this.openPlain(options, timeoutMs));
+      }
     } catch (err) {
       if (this.generation === generation) {
         this.connected = false;
@@ -108,7 +112,6 @@ export class TcpModbusDriver implements ModbusDriver {
       throw new Error('Modbus connect superseded');
     }
 
-    const client = new Modbus.client.TCP(socket, options.unitId);
     socket.on('close', () => {
       if (this.generation !== generation || this.socket !== socket) return;
       this.connected = false;
@@ -123,12 +126,16 @@ export class TcpModbusDriver implements ModbusDriver {
     this.connected = true;
   }
 
-  private connectPlain(
+  private openPlain(
     options: ModbusConnectionOptions,
     timeoutMs: number,
-  ): Promise<net.Socket> {
+  ): Promise<{
+    socket: net.Socket;
+    client: InstanceType<typeof Modbus.client.TCP>;
+  }> {
     const socket = new net.Socket();
-    return new Promise<net.Socket>((resolve, reject) => {
+    const client = new Modbus.client.TCP(socket, options.unitId);
+    return new Promise((resolve, reject) => {
       const onError = (err: Error) => {
         cleanup();
         socket.destroy();
@@ -136,7 +143,7 @@ export class TcpModbusDriver implements ModbusDriver {
       };
       const onConnect = () => {
         cleanup();
-        resolve(socket);
+        resolve({ socket, client });
       };
       const timer = setTimeout(() => {
         cleanup();
@@ -160,23 +167,28 @@ export class TcpModbusDriver implements ModbusDriver {
     });
   }
 
-  private connectTls(
+  private openTls(
     options: ModbusConnectionOptions,
     timeoutMs: number,
-  ): Promise<tls.TLSSocket> {
+  ): Promise<{
+    socket: tls.TLSSocket;
+    client: InstanceType<typeof Modbus.client.TCP>;
+  }> {
     const tlsOpts = options.tls!;
     const readOptional = (path?: string | null) =>
       path?.trim() ? readFileSync(path.trim()) : undefined;
-    return new Promise<tls.TLSSocket>((resolve, reject) => {
-      const socket = tls.connect({
-        host: options.host,
-        port: options.port,
-        ca: readOptional(tlsOpts.caPath),
-        cert: readOptional(tlsOpts.certPath),
-        key: readOptional(tlsOpts.keyPath),
-        rejectUnauthorized: tlsOpts.rejectUnauthorized !== false,
-        servername: options.host,
-      });
+    const socket = tls.connect({
+      host: options.host,
+      port: options.port,
+      ca: readOptional(tlsOpts.caPath),
+      cert: readOptional(tlsOpts.certPath),
+      key: readOptional(tlsOpts.keyPath),
+      rejectUnauthorized: tlsOpts.rejectUnauthorized !== false,
+      servername: options.host,
+    });
+    // Attach before secureConnect so jsmodbus sees the upcoming `connect` event.
+    const client = new Modbus.client.TCP(socket, options.unitId);
+    return new Promise((resolve, reject) => {
       const onError = (err: Error) => {
         cleanup();
         socket.destroy();
@@ -184,7 +196,7 @@ export class TcpModbusDriver implements ModbusDriver {
       };
       const onSecure = () => {
         cleanup();
-        resolve(socket);
+        resolve({ socket, client });
       };
       const timer = setTimeout(() => {
         cleanup();

@@ -35,7 +35,6 @@ describe('AlarmEngineService', () => {
   const events = {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn(),
-    findOneByOrFail: jest.fn(),
     save: jest.fn().mockImplementation(async (x) => ({ id: 'e1', ...x })),
     create: jest.fn((x) => x),
     createQueryBuilder: jest.fn(() => eventsDeleteQb),
@@ -343,7 +342,7 @@ describe('AlarmEngineService', () => {
   });
 
   it('lists active and acks/shelves events', async () => {
-    events.findOneByOrFail.mockResolvedValue({
+    events.findOne.mockResolvedValue({
       id: 'e1',
       state: 'active',
       definition: { id: 'd1', name: 'E-Stop asserted' },
@@ -364,7 +363,7 @@ describe('AlarmEngineService', () => {
       }),
     );
 
-    events.findOneByOrFail.mockResolvedValue({
+    events.findOne.mockResolvedValue({
       id: 'e1',
       state: 'active',
       definition: { id: 'd1', name: 'E-Stop asserted' },
@@ -379,6 +378,19 @@ describe('AlarmEngineService', () => {
         resource: 'E-Stop asserted',
         result: 'success',
       }),
+    );
+  });
+
+  it('returns not found when ack/shelve/unshelve target a missing event', async () => {
+    events.findOne.mockResolvedValue(null);
+    await expect(service.ack('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.shelve('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.unshelve('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
     );
   });
 
@@ -501,7 +513,7 @@ describe('AlarmEngineService', () => {
   });
 
   it('unshelves a shelved alarm and rejects others', async () => {
-    events.findOneByOrFail.mockResolvedValueOnce({
+    events.findOne.mockResolvedValueOnce({
       id: 'e1',
       state: 'active',
       definition: { id: 'd1', name: 'E-Stop asserted' },
@@ -509,7 +521,7 @@ describe('AlarmEngineService', () => {
     await expect(service.unshelve('e1')).rejects.toBeInstanceOf(
       BadRequestException,
     );
-    events.findOneByOrFail.mockResolvedValueOnce({
+    events.findOne.mockResolvedValueOnce({
       id: 'e1',
       state: 'shelved',
       definition: { id: 'd1', name: 'E-Stop asserted' },
@@ -525,7 +537,7 @@ describe('AlarmEngineService', () => {
         result: 'success',
       }),
     );
-    events.findOneByOrFail.mockResolvedValueOnce({
+    events.findOne.mockResolvedValueOnce({
       id: 'e2',
       state: 'shelved',
     });

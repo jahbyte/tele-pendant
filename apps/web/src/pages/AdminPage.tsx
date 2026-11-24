@@ -721,6 +721,13 @@ export function AdminPage() {
                     refreshLayout(),
                   )
                 }
+                onDelete={async (id) => {
+                  await apiDelete(`/hmi/backgrounds/${id}`);
+                  setEditScreenId((current) =>
+                    current === id ? null : current,
+                  );
+                  await refreshLayout();
+                }}
                 onCreate={(name) =>
                   apiPost('/hmi/backgrounds', { name }).then(() =>
                     refreshLayout(),
@@ -2244,6 +2251,7 @@ function BackgroundScreens({
   onEdit,
   onActivate,
   onCopy,
+  onDelete,
   onCreate,
   note,
   onNote,
@@ -2254,11 +2262,13 @@ function BackgroundScreens({
   onEdit: (id: string) => void;
   onActivate: (id: string) => Promise<unknown>;
   onCopy: (id: string) => Promise<unknown>;
+  onDelete: (id: string) => Promise<unknown>;
   onCreate: (name: string) => Promise<unknown>;
   note?: Note;
   onNote: (note: Note) => void;
 }) {
   const [newName, setNewName] = useState('');
+  const { askDelete, deleteConfirmDialog } = useDeleteConfirmDialog();
 
   async function activate(id: string) {
     try {
@@ -2286,6 +2296,21 @@ function BackgroundScreens({
     }
   }
 
+  function remove(screen: { id: string; name: string }) {
+    askDelete(screen.name, async () => {
+      try {
+        await onDelete(screen.id);
+        const success = { ok: true as const, text: 'Screen deleted.' };
+        onNote(success);
+        toastOk(success.text);
+      } catch (err) {
+        const failure = { ok: false as const, text: noteText(err) };
+        onNote(failure);
+        toastErr(failure.text);
+      }
+    });
+  }
+
   async function create(event: FormEvent) {
     event.preventDefault();
     try {
@@ -2303,11 +2328,14 @@ function BackgroundScreens({
 
   return (
     <div className="grid gap-3">
+      {deleteConfirmDialog}
       <div>
         <h3 className="text-sm font-medium">Plant screens</h3>
         <p className="text-xs text-muted-foreground">
           Choose a screen to edit its picture, buttons, and labels. Activate
           sets the shared default for devices that have not chosen a screen.
+          Delete removes an inactive copy (activate another screen first if it
+          is the default).
         </p>
       </div>
       <ul className="grid gap-2">
@@ -2349,6 +2377,17 @@ function BackgroundScreens({
                   onClick={() => void activate(screen.id)}
                 >
                   Activate
+                </Button>
+              ) : null}
+              {!screen.active ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Delete ${screen.name}`}
+                  onClick={() => remove(screen)}
+                >
+                  Delete
                 </Button>
               ) : null}
             </span>
