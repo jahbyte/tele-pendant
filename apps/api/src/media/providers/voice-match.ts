@@ -4,7 +4,6 @@ const FILLERS = new Set([
   'the',
   'a',
   'to',
-  'move',
   'crane',
   'and',
   'hey',
@@ -13,8 +12,17 @@ const FILLERS = new Set([
   'now',
 ]);
 
-const TROLLEY_WORDS = new Set(['trolley', 'trolly', 'trawley']);
-const RIGHT_WORDS = new Set(['right', 'write', 'rite']);
+/** Allowlisted cell label plus optional selector rocker side. */
+export type VoiceMatch = {
+  label: string;
+  /** Selector: a = primary, b = secondary. */
+  direction?: 'a' | 'b';
+};
+
+const BACK_WORDS = new Set(['back', 'backward', 'backwards', 'backw']);
+const FWD_WORDS = new Set(['forward', 'forwards', 'forw', 'fwd', 'fore']);
+const CLOSE_WORDS = new Set(['close', 'closed']);
+const OPEN_WORDS = new Set(['open', 'opened']);
 
 function normalize(transcript: string): string[] {
   return transcript
@@ -24,60 +32,156 @@ function normalize(transcript: string): string[] {
     .filter((token) => token.length > 0);
 }
 
-function levenshtein(a: string, b: string): number {
-  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    let diag = prev[0];
-    prev[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const next = prev[j];
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      prev[j] = Math.min(prev[j - 1] + 1, prev[j] + 1, diag + cost);
-      diag = next;
-    }
-  }
-  return prev[b.length];
+function spoken(tokens: string[]): string[] {
+  return tokens.filter((token) => !FILLERS.has(token));
 }
 
-function near(token: string, words: Set<string>, maxDist: number): boolean {
-  if (words.has(token)) return true;
-  for (const word of words) {
-    if (Math.abs(word.length - token.length) > maxDist) continue;
-    if (levenshtein(token, word) <= maxDist) return true;
+function has(tokens: string[], word: string): boolean {
+  return tokens.includes(word);
+}
+
+function hasAny(tokens: string[], words: Set<string>): boolean {
+  return tokens.some((token) => words.has(token));
+}
+
+function includesPhrase(tokens: string[], phrase: string[]): boolean {
+  for (let i = 0; i <= tokens.length - phrase.length; i++) {
+    let ok = true;
+    for (let j = 0; j < phrase.length; j++) {
+      if (tokens[i + j] !== phrase[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
   }
   return false;
 }
 
+function directionUpDown(tokens: string[]): 'a' | 'b' | null {
+  const up = has(tokens, 'up');
+  const down = has(tokens, 'down');
+  if (up && !down) return 'a';
+  if (down && !up) return 'b';
+  return null;
+}
+
 /**
- * Map a speech transcript to an allowlisted cell label.
- * Hoist motion is the words UP and DOWN only.
+ * Map a speech transcript to a P03A21 pendant cell label.
+ * Bare up/down (and legacy hoist) drive OWVA; trolley aliases drive OWHA.
  */
-export function matchVoiceCommand(transcript: string): string | null {
+export function matchVoiceCommand(transcript: string): VoiceMatch | null {
   const tokens = normalize(transcript);
   if (tokens.length === 0) return null;
 
   if (tokens.some((token) => token === 'stop' || token === 'stopped')) {
-    return 'STOP';
+    return { label: 'STOP' };
   }
 
-  let direction: 'up' | 'down' | null = null;
-  for (const token of tokens) {
-    if (token === 'up') direction = 'up';
-    else if (token === 'down') direction = 'down';
+  const words = spoken(tokens);
+
+  if (has(words, 'enable')) {
+    return { label: 'Enable' };
   }
-  if (direction === 'up') return 'Hoist Up';
-  if (direction === 'down') return 'Hoist Down';
 
-  const spoken = (token: string) => !FILLERS.has(token);
-  const trolley = tokens.some(
-    (token) => spoken(token) && near(token, TROLLEY_WORDS, 1),
-  );
-  const left = tokens.includes('left');
-  const right = tokens.some(
-    (token) => spoken(token) && near(token, RIGHT_WORDS, 1),
-  );
+  if (has(words, 'buttons')) {
+    return { label: 'Buttons active' };
+  }
 
-  if (trolley && left && !right) return 'Trolley L';
-  if (trolley && right && !left) return 'Trolley R';
+  if (has(words, 'pipe')) {
+    return { label: 'Teach Pipe Middle Position' };
+  }
+
+  if (includesPhrase(words, ['teach', 'welding']) || has(words, 'weld')) {
+    return { label: 'OWVA/OWCA Teach Welding Position' };
+  }
+
+  if (has(words, 'laser') || includesPhrase(words, ['teach', 'seam'])) {
+    return { label: 'Teach Seam Tracking Laser' };
+  }
+
+  if (has(words, 'seam')) {
+    return { label: 'Seam Tracking on/off' };
+  }
+
+  if (has(words, 'home')) {
+    return { label: 'OWVA, OWCA, OWCVA Move Home Position' };
+  }
+
+  if (has(words, 'height')) {
+    return { label: 'OWVA Height Reg. on/off' };
+  }
+
+  if (has(words, 'axis')) {
+    return { label: 'Axis fast/slowly' };
+  }
+
+  if (
+    includesPhrase(words, ['move', 'welding']) ||
+    includesPhrase(words, ['welding', 'position'])
+  ) {
+    return { label: 'OWVA, OWCA, OWCVA Move Welding Posit.' };
+  }
+
+  if (has(words, 'owff')) {
+    if (hasAny(words, CLOSE_WORDS) && !hasAny(words, OPEN_WORDS)) {
+      return { label: 'OWFF Welding Flux Flap close/open', direction: 'a' };
+    }
+    if (hasAny(words, OPEN_WORDS) && !hasAny(words, CLOSE_WORDS)) {
+      return { label: 'OWFF Welding Flux Flap close/open', direction: 'b' };
+    }
+    return null;
+  }
+
+  if (has(words, 'owwac')) {
+    const dir = directionUpDown(words);
+    return dir ? { label: 'OWWAC Wire Feed AC up/down', direction: dir } : null;
+  }
+
+  if (has(words, 'owwdc')) {
+    const dir = directionUpDown(words);
+    return dir ? { label: 'OWWDC Wire Feed DC up/down', direction: dir } : null;
+  }
+
+  if (has(words, 'owcva')) {
+    if (has(words, 'down') && !has(words, 'up')) {
+      return { label: 'OWCVA down/up', direction: 'a' };
+    }
+    if (has(words, 'up') && !has(words, 'down')) {
+      return { label: 'OWCVA down/up', direction: 'b' };
+    }
+    return null;
+  }
+
+  if (has(words, 'owva') || has(words, 'hoist')) {
+    const dir = directionUpDown(words);
+    return dir ? { label: 'OWVA up/down', direction: dir } : null;
+  }
+
+  if (has(words, 'owha') || has(words, 'trolley') || has(words, 'trolly')) {
+    if (has(words, 'left') || hasAny(words, BACK_WORDS)) {
+      return { label: 'OWHA backw./forw.', direction: 'a' };
+    }
+    if (has(words, 'right') || hasAny(words, FWD_WORDS)) {
+      return { label: 'OWHA backw./forw.', direction: 'b' };
+    }
+    return null;
+  }
+
+  if (has(words, 'owca')) {
+    if (hasAny(words, BACK_WORDS) || has(words, 'left')) {
+      return { label: 'OWCA backw./forw.', direction: 'a' };
+    }
+    if (hasAny(words, FWD_WORDS) || has(words, 'right')) {
+      return { label: 'OWCA backw./forw.', direction: 'b' };
+    }
+    return null;
+  }
+
+  const bare = directionUpDown(words);
+  if (bare) {
+    return { label: 'OWVA up/down', direction: bare };
+  }
+
   return null;
 }

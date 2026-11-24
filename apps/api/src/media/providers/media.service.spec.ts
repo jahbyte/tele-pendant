@@ -16,23 +16,28 @@ describe('MediaService', () => {
     create: jest.fn((x) => x),
     remove: jest.fn(),
   };
+  const p03Cells = [
+    {
+      id: 'owva',
+      label: 'OWVA up/down',
+      isMotion: true,
+      requiresSafeAction: false,
+    },
+    {
+      id: 'owha',
+      label: 'OWHA backw./forw.',
+      isMotion: true,
+      requiresSafeAction: false,
+    },
+    {
+      id: 'stop',
+      label: 'STOP',
+      isMotion: false,
+      requiresSafeAction: true,
+    },
+  ];
   const hmiService = {
-    getLayout: jest.fn().mockResolvedValue({
-      cells: [
-        {
-          id: 'c1',
-          label: 'Hoist Up',
-          isMotion: true,
-          requiresSafeAction: false,
-        },
-        {
-          id: 'stop',
-          label: 'STOP',
-          isMotion: false,
-          requiresSafeAction: true,
-        },
-      ],
-    }),
+    getLayout: jest.fn().mockResolvedValue({ cells: p03Cells }),
     activateCell: jest.fn().mockResolvedValue({ ok: true }),
   };
   const safetyState = {
@@ -49,22 +54,7 @@ describe('MediaService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     codes.count.mockResolvedValue(1);
-    hmiService.getLayout.mockResolvedValue({
-      cells: [
-        {
-          id: 'c1',
-          label: 'Hoist Up',
-          isMotion: true,
-          requiresSafeAction: false,
-        },
-        {
-          id: 'stop',
-          label: 'STOP',
-          isMotion: false,
-          requiresSafeAction: true,
-        },
-      ],
-    });
+    hmiService.getLayout.mockResolvedValue({ cells: p03Cells });
     safetyState.allowTimedMediaMotion.mockResolvedValue(true);
     safetyState.canIssueMotion.mockReturnValue(true);
     service = new MediaService(
@@ -180,14 +170,19 @@ describe('MediaService', () => {
   });
 
   it('keeps the first motion phrase when a later phrase is also motion', async () => {
-    const result = await service.voiceCommand('hoist up', {
+    const result = await service.voiceCommand('owva up', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
-      alternatives: ['hoist down'],
+      alternatives: ['owva down'],
     });
     expect(result).toEqual(
-      expect.objectContaining({ ok: true, label: 'Hoist Up' }),
+      expect.objectContaining({ ok: true, label: 'OWVA up/down' }),
+    );
+    expect(hmiService.activateCell).toHaveBeenCalledWith(
+      'owva',
+      true,
+      expect.objectContaining({ direction: 'a' }),
     );
   });
 
@@ -199,8 +194,8 @@ describe('MediaService', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('maps exact and fuzzy voice aliases', async () => {
-    const exact = await service.voiceCommand('hoist up', {
+  it('maps exact and fuzzy voice aliases to P03A21 cells', async () => {
+    const exact = await service.voiceCommand('owva up', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
@@ -209,6 +204,11 @@ describe('MediaService', () => {
     expect(exact.ok).toBe(true);
     expect(safetyState.pulseDeadman).not.toHaveBeenCalled();
     expect(safetyState.canIssueMotion).toHaveBeenCalledWith('u1', 'device-1');
+    expect(hmiService.activateCell).toHaveBeenCalledWith(
+      'owva',
+      true,
+      expect.objectContaining({ direction: 'a' }),
+    );
 
     const fuzzy = await service.voiceCommand('please hoist up now', {
       role: UserRole.OPERATOR,
@@ -216,6 +216,7 @@ describe('MediaService', () => {
       userId: 'u1',
     });
     expect(fuzzy.ok).toBe(true);
+    expect(fuzzy).toEqual(expect.objectContaining({ label: 'OWVA up/down' }));
 
     safetyState.canIssueMotion.mockClear();
     const stop = await service.voiceCommand('emergency stop', {
@@ -233,13 +234,13 @@ describe('MediaService', () => {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
-      alternatives: ['completely wrong', 'hoist up'],
+      alternatives: ['completely wrong', 'owva up'],
     });
     expect(result).toEqual(
       expect.objectContaining({
         ok: true,
-        label: 'Hoist Up',
-        transcript: 'hoist up',
+        label: 'OWVA up/down',
+        transcript: 'owva up',
       }),
     );
   });
@@ -254,35 +255,23 @@ describe('MediaService', () => {
     );
   });
 
-  it('jogs hoist then clears the coil without releasing deadman (TP-29)', async () => {
+  it('jogs OWVA then clears the coil without releasing deadman (TP-29)', async () => {
     jest.useFakeTimers();
-    const result = await service.voiceCommand('hoist down', {
-      role: UserRole.OPERATOR,
-      clientId: 'device-1',
-      userId: 'u1',
-    });
-    expect(result.ok).toBe(false);
-
-    hmiService.getLayout.mockResolvedValueOnce({
-      cells: [
-        {
-          id: 'down',
-          label: 'Hoist Down',
-          isMotion: true,
-          requiresSafeAction: false,
-        },
-      ],
-    });
     const down = await service.voiceCommand('down', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
     });
     expect(down).toEqual(
-      expect.objectContaining({ ok: true, label: 'Hoist Down' }),
+      expect.objectContaining({ ok: true, label: 'OWVA up/down' }),
+    );
+    expect(hmiService.activateCell).toHaveBeenCalledWith(
+      'owva',
+      true,
+      expect.objectContaining({ direction: 'b' }),
     );
     await jest.advanceTimersByTimeAsync(2800);
-    expect(hmiService.activateCell).toHaveBeenCalledWith('down', false, {});
+    expect(hmiService.activateCell).toHaveBeenCalledWith('owva', false, {});
     expect(safetyState.releaseDeadman).not.toHaveBeenCalled();
     expect(safetyState.pulseDeadman).not.toHaveBeenCalled();
   });
@@ -295,12 +284,12 @@ describe('MediaService', () => {
         return Promise.resolve({ ok: true });
       },
     );
-    await service.voiceCommand('hoist up', {
+    await service.voiceCommand('owva up', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
     });
-    await service.voiceCommand('hoist up', {
+    await service.voiceCommand('owva up', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
@@ -311,7 +300,7 @@ describe('MediaService', () => {
 
   it('refuses timed motion without an active deadman hold (TP-29)', async () => {
     safetyState.canIssueMotion.mockReturnValue(false);
-    const blocked = await service.voiceCommand('hoist up', {
+    const blocked = await service.voiceCommand('owva up', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
@@ -330,50 +319,16 @@ describe('MediaService', () => {
     expect(stop.ok).toBe(true);
   });
 
-  it('clears the opposite hoist coil and ignores a non-hoist motion cell', async () => {
-    hmiService.getLayout.mockResolvedValue({
-      cells: [
-        { id: 'up', label: 'Hoist Up', isMotion: true },
-        { id: 'down', label: 'Hoist Down', isMotion: true },
-        { id: 'left', label: 'Trolley L', isMotion: true },
-      ],
-    });
-    await service.voiceCommand('down', {
-      role: UserRole.OPERATOR,
-      clientId: 'device-1',
-      userId: 'u1',
-    });
-    expect(hmiService.activateCell).toHaveBeenCalledWith(
-      'up',
-      false,
-      expect.any(Object),
-    );
-    expect(hmiService.activateCell).toHaveBeenCalledWith(
-      'down',
-      true,
-      expect.any(Object),
-    );
-
-    hmiService.activateCell.mockImplementation(
-      (_id: string, value: boolean) => {
-        if (!value) return Promise.reject(new Error('clear'));
-        return Promise.resolve({ ok: true });
-      },
-    );
-    await service.voiceCommand('up', {
-      role: UserRole.OPERATOR,
-      clientId: 'device-1',
-      userId: 'u1',
-    });
+  it('passes selector direction for OWHA trolley aliases', async () => {
     await service.voiceCommand('trolley left', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
       userId: 'u1',
     });
     expect(hmiService.activateCell).toHaveBeenCalledWith(
-      'left',
+      'owha',
       true,
-      expect.any(Object),
+      expect.objectContaining({ direction: 'a' }),
     );
   });
 
@@ -390,7 +345,7 @@ describe('MediaService', () => {
 
   it('refuses timed motion unless Config allows it', async () => {
     safetyState.allowTimedMediaMotion.mockResolvedValueOnce(false);
-    const blocked = await service.voiceCommand('hoist up', {
+    const blocked = await service.voiceCommand('owva up', {
       role: UserRole.OPERATOR,
       clientId: 'device-1',
     });

@@ -5,11 +5,6 @@ import { renderWithProviders } from '../test/render';
 import * as api from '../lib/api';
 
 const navigateMock = vi.hoisted(() => vi.fn());
-const socket = vi.hoisted(() => ({
-  emit: vi.fn(),
-  on: vi.fn(),
-  off: vi.fn(),
-}));
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return {
@@ -17,10 +12,6 @@ vi.mock('react-router-dom', async (importOriginal) => {
     useNavigate: () => navigateMock,
   };
 });
-vi.mock('../lib/realtime', () => ({
-  getRealtimeSocket: () => socket,
-}));
-
 const zxingState = vi.hoisted(() => ({ mode: 'TP-CRANE-DEMO-01' }));
 const cameraOverride = vi.hoisted(() => ({
   impl: null as
@@ -62,7 +53,6 @@ describe('MediaPage', () => {
   beforeEach(() => {
     cameraOverride.impl = null;
     navigateMock.mockClear();
-    socket.emit.mockClear();
     zxingState.mode = 'TP-CRANE-DEMO-01';
     delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
     toastMocks.ok.mockClear();
@@ -176,7 +166,7 @@ describe('MediaPage', () => {
     await waitFor(() => expect(api.apiPost).toHaveBeenCalled());
   });
 
-  it('handles camera, barcode, voice, and resolve failures', async () => {
+  it('handles camera, barcode, and resolve failures', async () => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: {
@@ -184,9 +174,6 @@ describe('MediaPage', () => {
       },
     });
     delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
-    delete window.SpeechRecognition;
-    delete window.webkitSpeechRecognition;
-
     vi.spyOn(api, 'apiGet').mockImplementation(async (path) => {
       if (path === '/media/camera') {
         return {
@@ -222,11 +209,6 @@ describe('MediaPage', () => {
       expect(toastMocks.err).toHaveBeenCalledWith('Resolve failed'),
     );
     expect(screen.getAllByText('Resolve failed').length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    expect(
-      await screen.findByText(/SpeechRecognition not supported/),
-    ).toBeInTheDocument();
   });
 
   it('handles non-Error camera denial', async () => {
@@ -256,361 +238,6 @@ describe('MediaPage', () => {
     expect(
       screen.queryByRole('button', { name: 'Allow camera again' }),
     ).not.toBeInTheDocument();
-  });
-
-  it('ignores deadman release failures when voice stops', async () => {
-    type Rec = {
-      start: () => void;
-      stop: () => void;
-      onend: (() => void) | null;
-    };
-    const instances: Rec[] = [];
-    window.SpeechRecognition = vi.fn(function SpeechRecognition(this: Rec) {
-      this.start = vi.fn();
-      this.stop = vi.fn();
-      this.onend = null;
-      instances.push(this);
-    }) as unknown as typeof window.SpeechRecognition;
-    vi.spyOn(api, 'apiPost').mockImplementation(async (path) => {
-      if (path === '/safety/deadman/release') throw new Error('release failed');
-      if (typeof path === 'string' && path.startsWith('/safety/')) return {};
-      return { ok: false };
-    });
-    renderWithProviders(<MediaPage />);
-    await screen.findByText(/Device camera notes/);
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instances[0]!.onend?.();
-    await Promise.resolve();
-  });
-
-  it('reuses an active deadman interval when voice is restarted', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    window.SpeechRecognition = vi.fn(function SpeechRecognition(this: {
-      start: () => void;
-      stop: () => void;
-      onresult: null;
-    }) {
-      this.start = vi.fn();
-      this.stop = vi.fn();
-      this.onresult = null;
-    }) as unknown as typeof window.SpeechRecognition;
-    vi.spyOn(api, 'apiPost').mockResolvedValue({});
-    renderWithProviders(<MediaPage />);
-    await screen.findByText(/Device camera notes/);
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    await vi.advanceTimersByTimeAsync(500);
-    vi.useRealTimers();
-  });
-
-  it('executes interim up/down voice commands', async () => {
-    type Rec = {
-      start: () => void;
-      stop: () => void;
-      onresult: ((e: unknown) => void) | null;
-    };
-    const instances: Rec[] = [];
-    window.SpeechRecognition = vi.fn(function SpeechRecognition(this: Rec) {
-      this.start = vi.fn();
-      this.stop = vi.fn();
-      this.onresult = null;
-      instances.push(this);
-    }) as unknown as typeof window.SpeechRecognition;
-    vi.spyOn(api, 'apiPost').mockImplementation(async (path) => {
-      if (typeof path === 'string' && path.startsWith('/safety/')) return {};
-      if (path === '/media/voice') {
-        return { ok: true, label: 'Hoist Up', message: 'Hoist Up moved' };
-      }
-      return {} as never;
-    });
-    renderWithProviders(<MediaPage />);
-    await screen.findByText(/Device camera notes/);
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    const instance = instances[0]!;
-    instance.onresult?.({
-      results: [[{ transcript: 'crane up now', isFinal: true }]],
-    });
-    await waitFor(() => expect(toastMocks.ok).toHaveBeenCalledWith('Hoist Up'));
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance.onresult?.({
-      results: [[{ transcript: 'again up', isFinal: true }]],
-    });
-    expect(instance.stop).toHaveBeenCalled();
-  });
-
-  it('starts voice listen even when safety posts fail', async () => {
-    vi.spyOn(api, 'apiPost').mockImplementation(async (path) => {
-      if (path === '/safety/control/claim') throw new Error('no claim');
-      if (path === '/safety/deadman/pulse') throw new Error('no pulse');
-      return { ok: true } as never;
-    });
-    window.SpeechRecognition = vi.fn(function SpeechRecognition(this: {
-      continuous: boolean;
-      interimResults: boolean;
-      lang: string;
-      maxAlternatives: number;
-      start: () => void;
-      stop: () => void;
-      onresult: null;
-      onerror: null;
-      onend: null;
-    }) {
-      this.continuous = false;
-      this.interimResults = false;
-      this.lang = 'en-US';
-      this.maxAlternatives = 1;
-      this.start = vi.fn();
-      this.stop = vi.fn();
-      this.onresult = null;
-      this.onerror = null;
-      this.onend = null;
-    }) as unknown as typeof window.SpeechRecognition;
-    renderWithProviders(<MediaPage />);
-    await screen.findByText(/Device camera notes/);
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    expect(socket.emit).toHaveBeenCalledWith('deadman.pulse');
-  });
-
-  it('runs speech recognition success and error paths', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    type Rec = {
-      continuous: boolean;
-      interimResults: boolean;
-      lang: string;
-      maxAlternatives: number;
-      start: () => void;
-      stop: () => void;
-      onresult: ((e: unknown) => void) | null;
-      onerror: ((e: unknown) => void) | null;
-      onend: (() => void) | null;
-    };
-    const instances: Rec[] = [];
-    // Vitest 5 requires a real constructor when the app uses `new Ctor()`.
-    window.SpeechRecognition = vi.fn(function SpeechRecognition(this: Rec) {
-      this.continuous = false;
-      this.interimResults = false;
-      this.lang = 'en-US';
-      this.maxAlternatives = 1;
-      this.start = vi.fn();
-      this.stop = vi.fn();
-      this.onresult = null;
-      this.onerror = null;
-      this.onend = null;
-      instances.push(this);
-    }) as unknown as typeof window.SpeechRecognition;
-    const instance = () => instances[instances.length - 1]!;
-
-    const voiceQueue: Array<unknown | Error | string> = [
-      { ok: true, message: 'Hoist Up moved' },
-      { ok: true, label: 'Hoist Up' },
-      { ok: false, reason: 'command_not_allowlisted' },
-      { ok: false },
-      new Error('voice failed'),
-      'nope',
-      { ok: true, label: 'Trolley L' },
-      new Error('trolley failed'),
-      { ok: true, label: 'STOP' },
-      { ok: true },
-      { ok: false },
-    ];
-    const post = vi.spyOn(api, 'apiPost').mockImplementation(async (path) => {
-      if (typeof path === 'string' && path.startsWith('/safety/')) {
-        return {};
-      }
-      const next = voiceQueue.shift();
-      if (next instanceof Error || typeof next === 'string') {
-        return Promise.reject(next);
-      }
-      return next as never;
-    });
-    const voiceCalls = () =>
-      post.mock.calls.filter(([path]) => path === '/media/voice');
-
-    renderWithProviders(<MediaPage />);
-    await screen.findByText(/Device camera notes/);
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    expect(socket.emit).toHaveBeenCalledWith('deadman.pulse');
-    instance()!.onresult?.({
-      results: [{ isFinal: false, length: 0 }],
-    });
-    expect(await screen.findByText('Nothing heard')).toBeInTheDocument();
-    expect(voiceCalls()).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'go up' }]],
-    });
-    await waitFor(() => expect(toastMocks.ok).toHaveBeenCalledWith('up'));
-    expect(await screen.findByText('Hoist Up moved')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [
-        {
-          isFinal: false,
-          length: 1,
-          0: { transcript: 'hoist' },
-        },
-      ],
-    });
-    expect(await screen.findByText('Heard: hoist')).toBeInTheDocument();
-    expect(voiceCalls()).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: {
-        length: 2,
-        0: undefined,
-        1: {
-          isFinal: false,
-          length: 3,
-          0: { transcript: '   ' },
-          1: { transcript: 'hello' },
-          2: { transcript: 'up' },
-        },
-      },
-    });
-    expect(
-      await screen.findByText('Heard: up. Executed: Hoist Up'),
-    ).toBeInTheDocument();
-    instance()!.onresult?.({
-      results: [[{ transcript: 'again' }]],
-    });
-    expect(
-      screen.getByText('Heard: up. Executed: Hoist Up'),
-    ).toBeInTheDocument();
-    instance()!.onerror?.({ error: 'aborted' });
-    instance()!.onerror?.({ error: 'network' });
-    expect(
-      screen.getByText('Heard: up. Executed: Hoist Up'),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Heard: again')).not.toBeInTheDocument();
-    expect(voiceCalls()).toHaveLength(2);
-    expect(post).toHaveBeenCalledWith('/media/voice', { transcript: 'up' });
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({ results: [[{ transcript: 'dance' }]] });
-    expect(await screen.findByText(/Not executed/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({ results: [[]] });
-    expect(await screen.findByText('Nothing heard')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'hoist up', isFinal: true }]],
-    });
-    expect(
-      await screen.findByText(/Not executed: unknown/),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'hoist down' }]],
-    });
-    expect(
-      await screen.findByText(/Not executed: voice failed/),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'slow up' }]],
-    });
-    await waitFor(() => expect(toastMocks.err).toHaveBeenCalledWith('failed'));
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'trolley left' }]],
-    });
-    expect(await screen.findByText(/Executed: Trolley L/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'trolley right' }]],
-    });
-    expect(
-      await screen.findByText(/Not executed: trolley failed/),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'emergency stop' }]],
-    });
-    expect(await screen.findByText(/Executed: STOP/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'stop now' }]],
-    });
-    expect(await screen.findByText(/Executed: undefined/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onresult?.({
-      results: [[{ transcript: 'left' }]],
-    });
-    expect(
-      await screen.findByText(/Not executed: unknown/),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instance()!.onend?.();
-    expect(await screen.findByText('Nothing heard')).toBeInTheDocument();
-    instance()!.onerror?.({ error: 'no-speech' });
-    expect(await screen.findByText(/Nothing heard/)).toBeInTheDocument();
-    instance()!.onend?.();
-
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    await vi.advanceTimersByTimeAsync(8000);
-    expect(instance()!.stop).toHaveBeenCalled();
-    expect(socket.emit).toHaveBeenCalledWith('deadman.release');
-    vi.useRealTimers();
-  });
-
-  it('extends deadman after timed voice then releases when the hold expires (TP-29)', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    type Rec = {
-      continuous: boolean;
-      interimResults: boolean;
-      lang: string;
-      maxAlternatives: number;
-      start: () => void;
-      stop: () => void;
-      onresult: ((e: unknown) => void) | null;
-      onerror: ((e: unknown) => void) | null;
-      onend: (() => void) | null;
-    };
-    const instances: Rec[] = [];
-    window.SpeechRecognition = vi.fn(function SpeechRecognition(this: Rec) {
-      this.continuous = false;
-      this.interimResults = false;
-      this.lang = 'en-US';
-      this.maxAlternatives = 1;
-      this.start = vi.fn();
-      this.stop = vi.fn();
-      this.onresult = null;
-      this.onerror = null;
-      this.onend = null;
-      instances.push(this);
-    }) as unknown as typeof window.SpeechRecognition;
-
-    vi.spyOn(api, 'apiPost').mockImplementation(async (path) => {
-      if (typeof path === 'string' && path.startsWith('/safety/')) {
-        return {};
-      }
-      return { ok: true, label: 'Hoist Up', message: 'Hoist Up moved' };
-    });
-
-    renderWithProviders(<MediaPage />);
-    await screen.findByText(/Device camera notes/);
-    fireEvent.click(screen.getByRole('button', { name: /Listen/ }));
-    instances[0]!.onresult?.({
-      results: [[{ transcript: 'up' }]],
-    });
-    await waitFor(() => expect(toastMocks.ok).toHaveBeenCalledWith('Hoist Up'));
-    socket.emit.mockClear();
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(socket.emit).toHaveBeenCalledWith('deadman.release');
-    vi.useRealTimers();
   });
 
   it('renders without scan codes when the list request fails', async () => {

@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/sidebar';
 import { Separator } from '@/components/ui/separator';
 import { AccountMenu } from '@/components/account-menu';
+import { VoiceListenButton } from '@/components/voice-listen-button';
 import {
   ControlLeaseHeaderControls,
   ControlLeaseProvider,
@@ -54,6 +55,7 @@ export function AppShell() {
             </div>
             <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 md:gap-2">
               <ControlLeaseHeaderControls />
+              <VoiceListenButton />
               <AccountMenu />
               <PageTourBar screen={screen} />
               <ThemeToggle />

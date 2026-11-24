@@ -142,17 +142,20 @@ export class MediaService implements OnModuleInit {
       .map((phrase) => phrase.trim())
       .filter((phrase) => phrase.length > 0);
     let label: string | null = null;
+    let direction: 'a' | 'b' | undefined;
     let heard = transcript;
     for (const phrase of phrases) {
       const hit = matchVoiceCommand(phrase);
       if (!hit) continue;
-      if (hit === 'STOP') {
-        label = hit;
+      if (hit.label === 'STOP') {
+        label = hit.label;
+        direction = undefined;
         heard = phrase;
         break;
       }
       if (!label) {
-        label = hit;
+        label = hit.label;
+        direction = hit.direction;
         heard = phrase;
       }
     }
@@ -178,11 +181,11 @@ export class MediaService implements OnModuleInit {
           transcript: heard,
           label,
           message:
-            'Timed motion is off. Hold the button on Operator, or turn on Allow timed media motion in Config.',
+            'Timed motion is off. Hold Enable on Operator while you speak, or turn on Allow timed media motion in Config.',
         };
       }
       // TP-29: never synthesize deadman here — require the session hold
-      // (Listen deadman pulse or Operator hold) before timed voice motion.
+      // (header Listen pulse or Operator hold) before timed voice motion.
       if (!this.safetyState.canIssueMotion(opts.userId, clientId)) {
         return {
           ok: false,
@@ -190,34 +193,10 @@ export class MediaService implements OnModuleInit {
           transcript: heard,
           label,
           message:
-            'Claim exclusive control and hold deadman while Listen is active (or on Operator) before timed voice motion.',
+            'Claim exclusive control, hold Enable on Operator, and keep Listen active (or a deadman hold) before timed voice motion.',
         };
       }
       this.beginMotionJog(cell.id);
-      const otherLabel =
-        label === 'Hoist Up'
-          ? 'Hoist Down'
-          : label === 'Hoist Down'
-            ? 'Hoist Up'
-            : null;
-      const other = otherLabel
-        ? layout.cells.find((item) => item.label === otherLabel)
-        : undefined;
-      if (other) {
-        try {
-          await this.hmiService.activateCell(other.id, false, {
-            userId: opts.userId,
-            userEmail: opts.userEmail,
-            userDisplayName: opts.userDisplayName,
-            role: opts.role,
-            safeActionPin: opts.safeActionPin,
-            ip: opts.ip,
-            clientId,
-          });
-        } catch {
-          // The previous direction coil is cleared on a best-effort basis.
-        }
-      }
     }
 
     await this.hmiService.activateCell(cell.id, true, {
@@ -228,6 +207,7 @@ export class MediaService implements OnModuleInit {
       safeActionPin: opts.safeActionPin,
       ip: opts.ip,
       clientId,
+      direction,
     });
 
     await this.auditService.write({

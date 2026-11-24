@@ -1,40 +1,172 @@
 import { matchVoiceCommand } from './voice-match';
 
 describe('matchVoiceCommand', () => {
-  it('maps UP and DOWN, including when other words are around them', () => {
-    expect(matchVoiceCommand('up')).toBe('Hoist Up');
-    expect(matchVoiceCommand('DOWN')).toBe('Hoist Down');
-    expect(matchVoiceCommand('  Up! ')).toBe('Hoist Up');
-    expect(matchVoiceCommand('please hoist up now')).toBe('Hoist Up');
-    expect(matchVoiceCommand('hoist down')).toBe('Hoist Down');
-    expect(matchVoiceCommand('go down please')).toBe('Hoist Down');
-    expect(matchVoiceCommand('up down')).toBe('Hoist Down');
+  it('maps stop and enable', () => {
+    expect(matchVoiceCommand('stop')).toEqual({ label: 'STOP' });
+    expect(matchVoiceCommand('please stop')).toEqual({ label: 'STOP' });
+    expect(matchVoiceCommand('emergency stop')).toEqual({ label: 'STOP' });
+    expect(matchVoiceCommand('stopped')).toEqual({ label: 'STOP' });
+    expect(matchVoiceCommand('up stop')).toEqual({ label: 'STOP' });
+    expect(matchVoiceCommand('enable')).toEqual({ label: 'Enable' });
   });
 
-  it('does not treat hoist mishears as commands', () => {
-    expect(matchVoiceCommand('hoist')).toBeNull();
-    expect(matchVoiceCommand('hoist town')).toBeNull();
-    expect(matchVoiceCommand('hoist cup')).toBeNull();
-    expect(matchVoiceCommand('host')).toBeNull();
-    expect(matchVoiceCommand('highest')).toBeNull();
+  it('maps P03A21 pushbuttons', () => {
+    expect(matchVoiceCommand('buttons active')).toEqual({
+      label: 'Buttons active',
+    });
+    expect(matchVoiceCommand('teach pipe')).toEqual({
+      label: 'Teach Pipe Middle Position',
+    });
+    expect(matchVoiceCommand('teach welding')).toEqual({
+      label: 'OWVA/OWCA Teach Welding Position',
+    });
+    expect(matchVoiceCommand('weld')).toEqual({
+      label: 'OWVA/OWCA Teach Welding Position',
+    });
+    expect(matchVoiceCommand('teach seam')).toEqual({
+      label: 'Teach Seam Tracking Laser',
+    });
+    expect(matchVoiceCommand('laser')).toEqual({
+      label: 'Teach Seam Tracking Laser',
+    });
+    expect(matchVoiceCommand('seam tracking')).toEqual({
+      label: 'Seam Tracking on/off',
+    });
+    expect(matchVoiceCommand('move home')).toEqual({
+      label: 'OWVA, OWCA, OWCVA Move Home Position',
+    });
+    expect(matchVoiceCommand('height reg')).toEqual({
+      label: 'OWVA Height Reg. on/off',
+    });
+    expect(matchVoiceCommand('axis fast')).toEqual({
+      label: 'Axis fast/slowly',
+    });
+    expect(matchVoiceCommand('move welding')).toEqual({
+      label: 'OWVA, OWCA, OWCVA Move Welding Posit.',
+    });
+    expect(matchVoiceCommand('welding position')).toEqual({
+      label: 'OWVA, OWCA, OWCVA Move Welding Posit.',
+    });
   });
 
-  it('maps trolley, stop, and ignores unknown speech', () => {
-    expect(matchVoiceCommand('trolley left')).toBe('Trolley L');
-    expect(matchVoiceCommand('trolley right')).toBe('Trolley R');
-    expect(matchVoiceCommand('trolly left')).toBe('Trolley L');
-    expect(matchVoiceCommand('trolle left')).toBe('Trolley L');
-    expect(matchVoiceCommand('trolley write')).toBe('Trolley R');
-    expect(matchVoiceCommand('trolley left right')).toBeNull();
-    expect(matchVoiceCommand('please stop')).toBe('STOP');
-    expect(matchVoiceCommand('stop hoist up')).toBe('STOP');
-    expect(matchVoiceCommand('up stop')).toBe('STOP');
-    expect(matchVoiceCommand('stop')).toBe('STOP');
-    expect(matchVoiceCommand('emergency stop')).toBe('STOP');
-    expect(matchVoiceCommand('stopped')).toBe('STOP');
+  it('maps selector rockers with direction', () => {
+    expect(matchVoiceCommand('owva up')).toEqual({
+      label: 'OWVA up/down',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owva down')).toEqual({
+      label: 'OWVA up/down',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('up')).toEqual({
+      label: 'OWVA up/down',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('DOWN')).toEqual({
+      label: 'OWVA up/down',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('please hoist up now')).toEqual({
+      label: 'OWVA up/down',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owcva down')).toEqual({
+      label: 'OWCVA down/up',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owcva up')).toEqual({
+      label: 'OWCVA down/up',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('owha back')).toEqual({
+      label: 'OWHA backw./forw.',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owha forward')).toEqual({
+      label: 'OWHA backw./forw.',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('trolley left')).toEqual({
+      label: 'OWHA backw./forw.',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('trolley right')).toEqual({
+      label: 'OWHA backw./forw.',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('trolly left')).toEqual({
+      label: 'OWHA backw./forw.',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owca back')).toEqual({
+      label: 'OWCA backw./forw.',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owca forward')).toEqual({
+      label: 'OWCA backw./forw.',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('owca right')).toEqual({
+      label: 'OWCA backw./forw.',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('owca left')).toEqual({
+      label: 'OWCA backw./forw.',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owff close')).toEqual({
+      label: 'OWFF Welding Flux Flap close/open',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owff closed')).toEqual({
+      label: 'OWFF Welding Flux Flap close/open',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owff open')).toEqual({
+      label: 'OWFF Welding Flux Flap close/open',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('owff opened')).toEqual({
+      label: 'OWFF Welding Flux Flap close/open',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('owwac up')).toEqual({
+      label: 'OWWAC Wire Feed AC up/down',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owwac down')).toEqual({
+      label: 'OWWAC Wire Feed AC up/down',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('owwdc up')).toEqual({
+      label: 'OWWDC Wire Feed DC up/down',
+      direction: 'a',
+    });
+    expect(matchVoiceCommand('owwdc down')).toEqual({
+      label: 'OWWDC Wire Feed DC up/down',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('raise up')).toEqual({
+      label: 'OWVA up/down',
+      direction: 'a',
+    });
+  });
+
+  it('ignores unknown or incomplete speech', () => {
     expect(matchVoiceCommand('dance party')).toBeNull();
     expect(matchVoiceCommand('   ')).toBeNull();
-    expect(matchVoiceCommand('qq')).toBeNull();
     expect(matchVoiceCommand('xyzzy')).toBeNull();
+    expect(matchVoiceCommand('owva')).toBeNull();
+    expect(matchVoiceCommand('hoist')).toBeNull();
+    expect(matchVoiceCommand('trolley')).toBeNull();
+    expect(matchVoiceCommand('owha')).toBeNull();
+    expect(matchVoiceCommand('owca')).toBeNull();
+    expect(matchVoiceCommand('owff')).toBeNull();
+    expect(matchVoiceCommand('owff close open')).toBeNull();
+    expect(matchVoiceCommand('owwac')).toBeNull();
+    expect(matchVoiceCommand('owwdc')).toBeNull();
+    expect(matchVoiceCommand('owcva')).toBeNull();
+    expect(matchVoiceCommand('owcva up down')).toBeNull();
+    expect(matchVoiceCommand('up down')).toBeNull();
   });
 });

@@ -400,8 +400,9 @@ export function MediaScreen({ token }: { token: string }) {
         <>
           <Section>{t('voice')}</Section>
           <Hint>
-            {t('phoneVoiceHint')} Timed up/down needs Allow timed media motion
-            in Config › Safety roles and an active deadman (Listen holds it).
+            {t('phoneVoiceHint')} Say stop, owva up/down, move home, and other
+            P03A21 names. Timed jogs need Allow timed media motion in Config and
+            Enable held on Operator (Listen also pulses deadman).
           </Hint>
           <Btn onPress={() => void listen()}>
             <Mic size={16} color="#041018" />
