@@ -534,6 +534,12 @@ describe('AdminPage', () => {
       .mockResolvedValueOnce({});
     showAdminSection('cells');
     await screen.findByDisplayValue('Up');
+    // Visible field names stay short; UUIDs / row ids are not printed as labels.
+    expect(screen.getAllByText('primary').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('feedback (optional)').length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.queryByText(/c1 primary/)).toBeNull();
 
     fireEvent.change(screen.getByLabelText('c1 row'), {
       target: { value: '1' },

@@ -1,3 +1,18 @@
+/**
+ * Split pendant drawing labels so the axis prefix and the action each get a line.
+ * Keeps "OWVA, OWCA, OWCVA Move Home Position" readable on a narrow phone cell.
+ */
+export function pendantLegendLines(label: string): string[] {
+  const trimmed = label.trim();
+  const match = trimmed.match(
+    /^(OWVA(?:\s*,\s*OWCA(?:\s*,\s*OWCVA)?|\/OWCA(?:\/OWCVA)?))\s+(.+)$/i,
+  );
+  if (match?.[1] && match[2]) {
+    return [match[1].replace(/\s*,\s*/g, ', '), match[2]];
+  }
+  return [trimmed];
+}
+
 /** Parse "… close/open" style labels into rocker side captions. */
 export function parseSelectorSideLabels(label: string): {
   sideA: string;

@@ -1439,12 +1439,16 @@ interface CellForm {
 
 function RegisterSelect({
   label,
+  ariaLabel,
   value,
   registers,
   allowEmpty,
   onChange,
 }: {
+  /** Visible field name — never a row UUID. */
   label: string;
+  /** Unique name for tests / screen readers when several cells share a page. */
+  ariaLabel: string;
   value: string;
   registers: RegisterOption[];
   allowEmpty: boolean;
@@ -1453,7 +1457,7 @@ function RegisterSelect({
   return (
     <AdminSelect
       label={allowEmpty ? `${label} (optional)` : label}
-      ariaLabel={label}
+      ariaLabel={ariaLabel}
       value={value}
       onChange={onChange}
       allowEmpty={allowEmpty}
@@ -1628,28 +1632,32 @@ function CellEditor({
         </div>
       </div>
       <RegisterSelect
-        label={`${noteKey} primary`}
+        label="primary"
+        ariaLabel={`${noteKey} primary`}
         value={primaryRegisterId}
         registers={registers}
         allowEmpty={false}
         onChange={setPrimaryRegisterId}
       />
       <RegisterSelect
-        label={`${noteKey} secondary (selector B)`}
+        label="secondary (selector B)"
+        ariaLabel={`${noteKey} secondary (selector B)`}
         value={secondaryRegisterId}
         registers={registers}
         allowEmpty
         onChange={setSecondaryRegisterId}
       />
       <RegisterSelect
-        label={`${noteKey} feedback`}
+        label="feedback"
+        ariaLabel={`${noteKey} feedback`}
         value={feedbackRegisterId}
         registers={registers}
         allowEmpty
         onChange={setFeedbackRegisterId}
       />
       <RegisterSelect
-        label={`${noteKey} status`}
+        label="status"
+        ariaLabel={`${noteKey} status`}
         value={statusRegisterId}
         registers={registers}
         allowEmpty
@@ -2027,7 +2035,8 @@ function OverlayEditor({
         </div>
       </div>
       <RegisterSelect
-        label={`${noteKey} overlay-register`}
+        label="register"
+        ariaLabel={`${noteKey} overlay-register`}
         value={registerId}
         registers={registers}
         allowEmpty

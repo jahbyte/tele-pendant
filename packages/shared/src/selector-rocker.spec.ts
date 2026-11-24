@@ -4,7 +4,29 @@ import {
   cellRequiresControlLease,
   cellUsesHoldToRun,
   parseSelectorSideLabels,
+  pendantLegendLines,
 } from './selector-rocker';
+
+describe('pendantLegendLines', () => {
+  it('puts the axis list on its own line', () => {
+    expect(pendantLegendLines('OWVA, OWCA, OWCVA Move Home Position')).toEqual([
+      'OWVA, OWCA, OWCVA',
+      'Move Home Position',
+    ]);
+    expect(pendantLegendLines('OWVA, OWCA, OWCVA Move Welding Posit.')).toEqual(
+      ['OWVA, OWCA, OWCVA', 'Move Welding Posit.'],
+    );
+    expect(pendantLegendLines('OWVA/OWCA Teach Welding Position')).toEqual([
+      'OWVA/OWCA',
+      'Teach Welding Position',
+    ]);
+  });
+
+  it('leaves ordinary labels as one line', () => {
+    expect(pendantLegendLines('Enable')).toEqual(['Enable']);
+    expect(pendantLegendLines('OWCVA down/up')).toEqual(['OWCVA down/up']);
+  });
+});
 
 describe('parseSelectorSideLabels', () => {
   it('splits the trailing a/b pair from pendant labels', () => {

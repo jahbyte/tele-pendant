@@ -28,6 +28,7 @@ import {
   MATRIX_CELL_STATE_I18N,
   operatorNeedsLiveTags,
   parseSelectorSideLabels,
+  pendantLegendLines,
   resolveMatrixCellUiState,
   nextLiveTagsCursor,
   shouldApplyLiveTags,
@@ -626,7 +627,7 @@ export function OperatorScreen({ token }: { token: string }) {
   const matrixCols = Math.max(1, grid?.cols ?? 1);
   const matrixGap = 2;
   const rowCount = Math.max(1, grid?.rows.length ?? 1);
-  const fitLegend = 20;
+  const fitLegend = 28;
   const fitCap = (() => {
     const padY = isP03a21 ? 4 : 0;
     const padX = isP03a21 ? 8 : 0;
@@ -854,20 +855,28 @@ export function OperatorScreen({ token }: { token: string }) {
     );
 
     if (isP03a21 && !isEstop) {
+      const legendLines = pendantLegendLines(cell.label);
       const legend = (
-        <Text
-          numberOfLines={2}
-          style={{
-            width: '100%',
-            textAlign: 'center',
-            color: '#1c1917',
-            fontSize: 8,
-            lineHeight: 10,
-            fontWeight: '600',
-          }}
-        >
-          {cell.label}
-        </Text>
+        <View style={{ width: '100%', paddingHorizontal: 1 }}>
+          {legendLines.map((line) => (
+            <Text
+              key={line}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+              style={{
+                width: '100%',
+                textAlign: 'center',
+                color: '#1c1917',
+                fontSize: legendLines.length > 1 ? 7 : 8,
+                lineHeight: legendLines.length > 1 ? 9 : 10,
+                fontWeight: '600',
+              }}
+            >
+              {line}
+            </Text>
+          ))}
+        </View>
       );
       if (isLamp) {
         return (

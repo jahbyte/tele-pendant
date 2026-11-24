@@ -56,6 +56,7 @@ export {
   cellUsesHoldToRun,
   isOperatorStopCell,
   parseSelectorSideLabels,
+  pendantLegendLines,
 } from './selector-rocker';
 export { tourStepsFor } from './tour';
 export type { TourScreen } from './tour';
