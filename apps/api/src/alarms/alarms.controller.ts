@@ -7,19 +7,25 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { ApiAuth } from '../common/swagger/api-auth.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtPayload } from '../auth/providers/auth.service';
 import { JwtAuthGuard } from '../auth/providers/jwt-auth.guard';
 import { RolesGuard } from '../auth/providers/roles.guard';
+import { SkipDataWrap } from '../common/swagger/skip-data-wrap.decorator';
 import { UserRole } from '../users/enums/user-role.enum';
 import { auditActorFromRequest } from '../common/audit-actor';
-import { AlarmEngineService } from './providers/alarm-engine.service';
+import {
+  AlarmEngineService,
+  parseAlarmHistoryHours,
+} from './providers/alarm-engine.service';
 import {
   SaveAlarmDefinitionDto,
   UpdateAlarmDefinitionDto,
@@ -39,6 +45,38 @@ export class AlarmsController {
   @ApiOperation({ summary: 'List active/acked/shelved alarms' })
   list() {
     return this.alarms.listActive();
+  }
+
+  @Get('history')
+  @Roles(UserRole.OPERATOR, UserRole.SUPERVISOR, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Alarm history for a time window (includes cleared)',
+  })
+  history(@Query('hours') hours?: string) {
+    return this.alarms.listHistory(parseAlarmHistoryHours(hours));
+  }
+
+  @Get('summary')
+  @Roles(UserRole.OPERATOR, UserRole.SUPERVISOR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Alarm frequency ranking for a time window' })
+  summary(@Query('hours') hours?: string) {
+    return this.alarms.summarize(parseAlarmHistoryHours(hours));
+  }
+
+  @Get('history.csv')
+  @SkipDataWrap()
+  @Roles(UserRole.OPERATOR, UserRole.SUPERVISOR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Export alarm history as CSV' })
+  async historyCsv(@Res() res: Response, @Query('hours') hours?: string) {
+    const windowHours = parseAlarmHistoryHours(hours);
+    const csv = await this.alarms.historyCsv(windowHours);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="alarms-${stamp}.csv"`,
+    );
+    res.send(csv);
   }
 
   @Get('definitions')

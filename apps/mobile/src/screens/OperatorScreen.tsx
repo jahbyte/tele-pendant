@@ -40,6 +40,7 @@ import { operatorApiError } from '../api-errors';
 import { apiGet, apiPost, getApiBase } from '../api';
 import { getControlClientId } from '../control-client-id';
 import { useControlLease } from '../control-lease';
+import { deferEnableRelease } from '../enable-voice-bridge';
 import type { Cell, ControlLease, Layout } from '../types';
 import { useLocale } from '../locale';
 import { HelpTip } from '../tour';
@@ -205,7 +206,6 @@ export function OperatorScreen({ token }: { token: string }) {
   const [jogSpeed, setJogSpeed] = useState<'slow' | 'fast'>('fast');
   const jogSpeedRef = useRef<'slow' | 'fast'>('fast');
   const [safety, setSafety] = useState<SafetySnap>({ mode: 'unknown' });
-  const [height, setHeight] = useState<number | null>(null);
   const [tags, setTags] = useState<TagSnapshot | null>(null);
 
   useEffect(() => {
@@ -267,9 +267,6 @@ export function OperatorScreen({ token }: { token: string }) {
         return;
       }
       tagOrderRef.current = nextLiveTagsCursor(tagOrderRef.current, payload);
-      if (typeof payload.hoistHeightMm === 'number') {
-        setHeight(payload.hoistHeightMm);
-      }
       setTags(payload);
     },
     [],
@@ -489,30 +486,38 @@ export function OperatorScreen({ token }: { token: string }) {
 
   const releaseCell = (cell: Cell, direction?: 'a' | 'b') => {
     if (!cellUsesHoldToRun(cell)) return;
-    const key = holdKey(cell.id, direction);
-    const held = holdsRef.current.get(key);
-    if (!held) return;
-    holdsRef.current.delete(key);
-    bumpHolds();
-    if (cell.style === 'enable') {
-      for (const [otherKey, hold] of [...holdsRef.current.entries()]) {
-        const other = layoutQuery.data?.cells.find(
-          (row) => row.id === hold.cellId,
-        );
-        if (!other || !cellPulsesDeadman(other)) continue;
-        holdsRef.current.delete(otherKey);
-        if (inflight.current.has(otherKey)) {
-          releaseWaiting.current.set(otherKey, hold.direction);
-          continue;
+    const run = () => {
+      const key = holdKey(cell.id, direction);
+      const held = holdsRef.current.get(key);
+      if (!held) return;
+      holdsRef.current.delete(key);
+      bumpHolds();
+      if (cell.style === 'enable') {
+        for (const [otherKey, hold] of [...holdsRef.current.entries()]) {
+          const other = layoutQuery.data?.cells.find(
+            (row) => row.id === hold.cellId,
+          );
+          if (!other || !cellPulsesDeadman(other)) continue;
+          holdsRef.current.delete(otherKey);
+          if (inflight.current.has(otherKey)) {
+            releaseWaiting.current.set(otherKey, hold.direction);
+            continue;
+          }
+          finishMotionRelease(otherKey, other.id, hold.direction);
         }
-        finishMotionRelease(otherKey, other.id, hold.direction);
       }
-    }
-    if (inflight.current.has(key)) {
-      releaseWaiting.current.set(key, direction ?? held.direction);
+      if (inflight.current.has(key)) {
+        releaseWaiting.current.set(key, direction ?? held.direction);
+        return;
+      }
+      finishMotionRelease(key, cell.id, direction ?? held.direction);
+    };
+    // Header mic can take the finger while Enable stays asserted for Listen.
+    if (cell.style === 'enable') {
+      deferEnableRelease(run);
       return;
     }
-    finishMotionRelease(key, cell.id, direction ?? held.direction);
+    run();
   };
 
   const clearSelector = async (cell: Cell) => {
@@ -1406,12 +1411,10 @@ export function OperatorScreen({ token }: { token: string }) {
     );
   };
 
-  // Crane mimic/readouts follow the active plant tab, not the shared cells.
-  const showCraneMetrics = false;
   const placedCells = (layoutQuery.data?.cells ?? []).filter((cell) =>
     isPlacedOnPicture(cell),
   );
-  const showOverlays = isPendantScreen || showCraneMetrics || useCustomGraphic;
+  const showOverlays = isPendantScreen || useCustomGraphic;
 
   return (
     <View className="flex-1 bg-background" style={{ minHeight: 0 }}>
@@ -1542,7 +1545,7 @@ export function OperatorScreen({ token }: { token: string }) {
                 className={`absolute z-[10] ${
                   useCustomGraphic && drawnImage.width > 0
                     ? ''
-                    : `inset-x-0 top-7 ${showCraneMetrics ? 'bottom-10' : 'bottom-2'}`
+                    : 'inset-x-0 top-7 bottom-2'
                 }`}
                 pointerEvents="box-none"
                 style={
@@ -1613,64 +1616,6 @@ export function OperatorScreen({ token }: { token: string }) {
                       {cell.label}
                     </Text>
                   </Pressable>
-                ))}
-              </View>
-            ) : null}
-            {showCraneMetrics ? (
-              <View className="absolute inset-x-0 bottom-0 z-10 flex-row border-t border-white/10 bg-[#07090c]/95 px-0.5 pb-0.5 pt-0.5">
-                {(
-                  [
-                    {
-                      label: 'Height',
-                      value: String(height ?? tags?.hoistHeightMm ?? '—'),
-                      unit: 'mm',
-                    },
-                    {
-                      label: 'Trolley',
-                      value: String(
-                        tags?.trolleyPositionMm ??
-                          tagValueForRegister(tags, 'holding.trolleyPosition'),
-                      ),
-                      unit: 'mm',
-                    },
-                    {
-                      label: 'Load',
-                      value: String(tags?.loadKg ?? '—'),
-                      unit: 'kg',
-                    },
-                    {
-                      label: 'Motor',
-                      value: safety.eStopActive
-                        ? 'IDLE'
-                        : tags?.motorRunning
-                          ? 'RUN'
-                          : 'IDLE',
-                      unit: 'status',
-                    },
-                  ] as const
-                ).map((metric, index) => (
-                  <View
-                    key={metric.label}
-                    className={`flex-1 items-center px-0.5 py-0.5 ${
-                      index > 0 ? 'border-l border-white/10' : ''
-                    }`}
-                  >
-                    <Text
-                      className="text-[6px] font-medium uppercase leading-none text-white/45"
-                      style={{ letterSpacing: 0.4 }}
-                    >
-                      {metric.label}
-                    </Text>
-                    <Text className="font-mono text-[10px] font-semibold leading-none text-white">
-                      {metric.value}
-                    </Text>
-                    <Text
-                      className="text-[6px] uppercase leading-none text-white/40"
-                      style={{ letterSpacing: 0.3 }}
-                    >
-                      {metric.unit}
-                    </Text>
-                  </View>
                 ))}
               </View>
             ) : null}

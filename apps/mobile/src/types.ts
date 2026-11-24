@@ -79,6 +79,9 @@ export type Layout = {
   };
 };
 
+export type PlcProtocol = 'modbus-tcp' | 'modbus-tls' | 'opcua';
+export type OpcSecurityMode = 'None' | 'Sign' | 'SignAndEncrypt';
+
 export type PlcConnection = {
   id: string;
   label: string;
@@ -87,7 +90,15 @@ export type PlcConnection = {
   unitId?: number;
   enabled: boolean;
   isSimulator: boolean;
-  protocol?: 'modbus-tcp' | 'opcua';
+  protocol?: PlcProtocol;
+  tlsCaPath?: string | null;
+  tlsCertPath?: string | null;
+  tlsKeyPath?: string | null;
+  tlsRejectUnauthorized?: boolean;
+  opcSecurityMode?: OpcSecurityMode | null;
+  opcSecurityPolicy?: string | null;
+  opcUsername?: string | null;
+  opcPasswordFile?: string | null;
 };
 
 export type ScreenName =

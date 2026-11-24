@@ -59,6 +59,42 @@ jest.mock('net', () => {
   };
 });
 
+jest.mock('tls', () => {
+  const { EventEmitter: EE } =
+    jest.requireActual<typeof import('events')>('events');
+  const created: FakeSocket[] = [];
+  const connect = jest.fn((): FakeSocket => {
+    const socket = new EE() as FakeSocket;
+    socket.connect = jest.fn();
+    socket.end = jest.fn((cb?: () => void) => {
+      queueMicrotask(() => {
+        socket.emit('close');
+        cb?.();
+      });
+      return socket;
+    });
+    socket.destroy = jest.fn(() => {
+      socket.emit('close');
+      return socket;
+    });
+    socket.off = (
+      event: string | symbol,
+      listener: (...args: unknown[]) => void,
+    ) => {
+      socket.removeListener(event, listener);
+      return socket;
+    };
+    created.push(socket);
+    queueMicrotask(() => socket.emit('secureConnect'));
+    return socket;
+  });
+  return { connect, __sockets: created };
+});
+
+jest.mock('node:fs', () => ({
+  readFileSync: jest.fn((path: string) => Buffer.from(`pem:${path}`)),
+}));
+
 jest.mock('jsmodbus', () => ({
   client: {
     TCP: jest.fn().mockImplementation(() => ({
@@ -325,5 +361,40 @@ describe('TcpModbusDriver (TP-41)', () => {
     client.readCoils.mockImplementation(() => new Promise(() => undefined));
     await expect(driver.readCoils(0, 1)).rejects.toThrow(/request timeout/);
     expect(driver.isConnected()).toBe(false);
+  });
+
+  it('connects with tls.connect when tls.enabled', async () => {
+    const tls = jest.requireMock('tls') as {
+      connect: jest.Mock;
+      __sockets: FakeSocket[];
+    };
+    const fs = jest.requireMock('node:fs') as { readFileSync: jest.Mock };
+    tls.__sockets.length = 0;
+    tls.connect.mockClear();
+    fs.readFileSync.mockClear();
+    const driver = new TcpModbusDriver();
+    await driver.connect({
+      host: 'plc.example',
+      port: 802,
+      unitId: 1,
+      tls: {
+        enabled: true,
+        caPath: '/certs/ca.pem',
+        certPath: '/certs/client.pem',
+        keyPath: '/certs/client.key',
+        rejectUnauthorized: true,
+      },
+    });
+    expect(driver.isConnected()).toBe(true);
+    expect(tls.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: 'plc.example',
+        port: 802,
+        rejectUnauthorized: true,
+        servername: 'plc.example',
+      }),
+    );
+    expect(fs.readFileSync).toHaveBeenCalledWith('/certs/ca.pem');
+    expect(Modbus.client.TCP).toHaveBeenCalled();
   });
 });

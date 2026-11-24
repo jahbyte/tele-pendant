@@ -37,6 +37,8 @@ export function tourStepsFor(screen: TourScreen): string[] {
         'tour.ops.diagnostics',
         'tour.ops.alarms',
         'tour.ops.ack',
+        'tour.ops.history',
+        'tour.ops.frequency',
         'tour.ops.trends',
       ];
     case 'face':

@@ -5,3 +5,15 @@
 ### List alarms
 GET {{baseUrl}}/api/{{apiVersion}}/alarms
 Authorization: Bearer {{accessToken}}
+
+### Alarm history (24h | 168 | 720)
+GET {{baseUrl}}/api/{{apiVersion}}/alarms/history?hours=24
+Authorization: Bearer {{accessToken}}
+
+### Alarm frequency
+GET {{baseUrl}}/api/{{apiVersion}}/alarms/summary?hours=24
+Authorization: Bearer {{accessToken}}
+
+### Alarm history CSV
+GET {{baseUrl}}/api/{{apiVersion}}/alarms/history.csv?hours=24
+Authorization: Bearer {{accessToken}}

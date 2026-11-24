@@ -118,6 +118,27 @@ export async function apiGet<T>(path: string, token: string): Promise<T> {
   return apiSend<T>('GET', path, undefined, token);
 }
 
+/** GET a non-JSON body (e.g. CSV export). */
+export async function apiGetText(path: string, token: string): Promise<string> {
+  const base = getApiBase();
+  const controlClientId = await getControlClientId();
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Control-Client-Id': controlClientId,
+      },
+      cache: 'no-store',
+    });
+  } catch (err) {
+    rethrowFetch(base, err);
+  }
+  await throwIfNotOk(res, path);
+  return res.text();
+}
+
 export async function apiUploadFile<T>(
   path: string,
   file: { uri: string; name: string; type: string },

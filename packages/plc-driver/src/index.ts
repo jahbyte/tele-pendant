@@ -1,5 +1,6 @@
 export type {
   ModbusShapedDriver,
+  OpcSecurityMode,
   PlcConnectOptions,
   PlcKind,
   PlcPoint,
@@ -7,4 +8,4 @@ export type {
 } from './port';
 export { ModbusPort } from './modbus-port';
 export { OpcUaPort } from './opcua-port';
-export type { OpcSession } from './opcua-port';
+export type { OpcSession, OpcUaSecurityOptions } from './opcua-port';

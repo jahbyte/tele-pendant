@@ -26,6 +26,9 @@ export class AlarmEvent {
   @Column({ name: 'acked_at', type: 'datetime', nullable: true })
   ackedAt?: Date | null;
 
+  @Column({ name: 'cleared_at', type: 'datetime', nullable: true })
+  clearedAt?: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 }

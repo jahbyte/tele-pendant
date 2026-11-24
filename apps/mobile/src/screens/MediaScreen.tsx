@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   Linking,
@@ -12,7 +12,7 @@ import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import { useQuery } from '@tanstack/react-query';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Mic, QrCode, Scan } from 'lucide-react-native';
+import { QrCode, Scan } from 'lucide-react-native';
 import { canManageScanCodes, type UserRole } from '@tele-pendant/shared';
 import { apiGet, apiPost } from '../api';
 import { useLocale } from '../locale';
@@ -30,9 +30,6 @@ import {
   showErrorFrom,
 } from '../ui';
 
-/** Keep deadman pulsed through a short timed voice jog (matches API VOICE_JOG_MS). */
-const VOICE_DEADMAN_HOLD_MS = 2500;
-const VOICE_DEADMAN_PULSE_MS = 400;
 const CAMERA_PREVIEW_HEIGHT = 220;
 
 const cameraPreviewStyle = StyleSheet.create({
@@ -86,13 +83,10 @@ export function MediaScreen({ token }: { token: string }) {
   const navigation = useNavigation<DrawerNavigationProp<RootDrawerParamList>>();
   const [code, setCode] = useState('');
   const [result, setResult] = useState<string | null>(null);
-  const [voice, setVoice] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [cameraBlocked, setCameraBlocked] = useState(false);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const lastCode = useRef('');
-  const deadmanPulseRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const deadmanHoldUntilRef = useRef(0);
   const [permission, requestPermission] = useCameraPermissions();
 
   const codes = useQuery({
@@ -107,57 +101,6 @@ export function MediaScreen({ token }: { token: string }) {
   useEffect(() => {
     if (!isFocused && scanning) setScanning(false);
   }, [isFocused, scanning]);
-
-  const releaseDeadman = useCallback(() => {
-    void apiPost('/safety/deadman/release', undefined, token).catch(
-      () => undefined,
-    );
-  }, [token]);
-
-  const stopDeadmanHold = useCallback(() => {
-    if (deadmanPulseRef.current) {
-      clearInterval(deadmanPulseRef.current);
-    }
-    deadmanPulseRef.current = null;
-    deadmanHoldUntilRef.current = 0;
-    releaseDeadman();
-  }, [releaseDeadman]);
-
-  const startDeadmanHold = useCallback(
-    (durationMs?: number) => {
-      void apiPost('/safety/control/claim', undefined, token).catch(
-        () => undefined,
-      );
-      void apiPost('/safety/deadman/pulse', undefined, token).catch(
-        () => undefined,
-      );
-      if (durationMs != null) {
-        deadmanHoldUntilRef.current = Date.now() + durationMs;
-      } else {
-        deadmanHoldUntilRef.current = 0;
-      }
-      if (deadmanPulseRef.current) return;
-      deadmanPulseRef.current = setInterval(() => {
-        if (
-          deadmanHoldUntilRef.current > 0 &&
-          Date.now() >= deadmanHoldUntilRef.current
-        ) {
-          stopDeadmanHold();
-          return;
-        }
-        void apiPost('/safety/deadman/pulse', undefined, token).catch(
-          () => undefined,
-        );
-      }, VOICE_DEADMAN_PULSE_MS);
-    },
-    [stopDeadmanHold, token],
-  );
-
-  useEffect(() => {
-    return () => {
-      if (deadmanPulseRef.current) clearInterval(deadmanPulseRef.current);
-    };
-  }, []);
 
   function followRouteHint(hint?: string | null) {
     if (!hint?.trim()) return;
@@ -187,33 +130,6 @@ export function MediaScreen({ token }: { token: string }) {
     }
   }
 
-  async function command(transcript: string) {
-    setVoice(`Heard: ${transcript}`);
-    try {
-      const res = await apiPost<{
-        ok: boolean;
-        label?: string;
-        reason?: string;
-      }>('/media/voice', { transcript }, token);
-      if (res.ok) {
-        setVoice(`Heard: ${transcript}. Executed: ${res.label}`);
-        if (/stop/i.test(res.label ?? '')) stopDeadmanHold();
-        else startDeadmanHold(VOICE_DEADMAN_HOLD_MS);
-      } else {
-        stopDeadmanHold();
-        showErrorAlert(
-          `Not executed: ${res.reason ?? 'unknown'}`,
-          'Voice command',
-        );
-        setVoice(`Heard: ${transcript}`);
-      }
-    } catch (err) {
-      stopDeadmanHold();
-      showErrorFrom(err, 'Voice command failed', 'Media');
-      setVoice(transcript ? `Heard: ${transcript}` : null);
-    }
-  }
-
   async function requestCameraAccess(): Promise<boolean> {
     const result = await requestPermission();
     if (result.granted) {
@@ -236,51 +152,6 @@ export function MediaScreen({ token }: { token: string }) {
     }
     const ok = await requestCameraAccess();
     if (ok) setScanning(true);
-  }
-
-  async function listen() {
-    setVoice(null);
-    try {
-      const speech = (await import('expo-speech-recognition')) as {
-        ExpoSpeechRecognitionModule: {
-          requestPermissionsAsync: () => Promise<{ granted: boolean }>;
-          start: (options: { lang: string; interimResults: boolean }) => void;
-          stop: () => void;
-          addListener: (
-            event: 'result',
-            listener: (event: {
-              results?: Array<{ transcript?: string }>;
-            }) => void,
-          ) => { remove: () => void };
-        };
-      };
-      const recognition = speech.ExpoSpeechRecognitionModule;
-      const permission = await recognition.requestPermissionsAsync();
-      if (!permission.granted) {
-        showErrorAlert('Microphone permission denied.', 'Listen');
-        return;
-      }
-      startDeadmanHold();
-      const sub = recognition.addListener('result', (event) => {
-        const transcript = event.results?.[0]?.transcript?.trim() ?? '';
-        sub.remove();
-        recognition.stop();
-        if (transcript) {
-          void command(transcript);
-        } else {
-          stopDeadmanHold();
-          setVoice('Nothing heard.');
-        }
-      });
-      recognition.start({ lang: 'en-US', interimResults: false });
-      setVoice('Listening…');
-    } catch {
-      stopDeadmanHold();
-      showErrorAlert(
-        'Listen needs a local debug build (npx expo run:android).',
-        'Listen',
-      );
-    }
   }
 
   const canEditCodes = userRole != null && canManageScanCodes(userRole);
@@ -396,21 +267,11 @@ export function MediaScreen({ token }: { token: string }) {
         </>
       </HelpTip>
       {result ? <OkText>{result}</OkText> : null}
-      <HelpTip id="tour.media.voice">
-        <>
-          <Section>{t('voice')}</Section>
-          <Hint>
-            {t('phoneVoiceHint')} Say stop, owva up/down, move home, and other
-            P03A21 names. Timed jogs need Allow timed media motion in Config and
-            Enable held on Operator (Listen also pulses deadman).
-          </Hint>
-          <Btn onPress={() => void listen()}>
-            <Mic size={16} color="#041018" />
-            <BtnText>{t('listen')}</BtnText>
-          </Btn>
-        </>
-      </HelpTip>
-      {voice ? <OkText>{voice}</OkText> : null}
+      <Section>{t('voice')}</Section>
+      <Hint>
+        Voice Listen is in the top header — hold Enable on Operator, then tap
+        the mic. {t('phoneVoiceHint')}
+      </Hint>
     </ScrollView>
   );
 }

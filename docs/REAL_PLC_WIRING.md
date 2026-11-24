@@ -84,9 +84,10 @@ Ask the PLC programmer or controls engineer for a short **I/O map** before you t
 
 | Ask for | Why |
 | ------- | --- |
-| Protocol | Modbus TCP (default) or OPC UA |
+| Protocol | Modbus TCP (lab/cleartext), Modbus TLS, or OPC UA (prefer SignAndEncrypt for plant) |
 | PLC IP address on the plant LAN | Config **Host** |
-| TCP port | Usually `502` (Modbus) or `4840` (OPC UA) |
+| TCP port | Usually `502` (Modbus), TLS Modbus port from gateway docs, or `4840` (OPC UA) |
+| Cert / key PEM paths (TLS or OPC UA) | Files on the API host / Docker volume (see [DRIVERS.md](./DRIVERS.md)) |
 | Modbus unit / slave ID | Config **Unit id** (often `1`) |
 | For each signal: name, type (coil / discrete / holding / input), **0-based or 1-based address**, and R/W | Config **Register maps** |
 | Which coil is e-stop / deadman / motion | Safety + Operator buttons |
@@ -109,7 +110,9 @@ These are **examples only**. Replace with your plant map.
 | **Host** | `192.168.10.50` | PLC Ethernet IP from the network settings, PLC web panel, or controls network diagram. Ping it from the API host. |
 | **Port** | `502` | Modbus TCP almost always `502`. Confirm in PLC Ethernet / Modbus server settings. |
 | **Unit id** | `1` | Modbus slave / unit / station ID in the PLC program or gateway (often `1`; some gateways use `0` or `255`). |
-| **Protocol** | `Modbus TCP` | From the controls team. Use **OPC UA** only if that is what the PLC exposes (see last section). |
+| **Protocol** | `Modbus TLS` or `OPC UA` for plant; `Modbus TCP` only on isolated OT / VPN or the demo simulator | Cleartext Modbus shows a Config warning. Prefer OPC UA SignAndEncrypt or Modbus TLS. |
+| **CA / client cert / key paths** | `/certs/ca.pem`, `/certs/client.pem`, `/certs/client.key` | Required for Modbus TLS and for OPC UA Sign / SignAndEncrypt. Mount a volume into the API container. |
+| **Verify server certificate** | checked | Lab-only to turn off. |
 | **Use this PLC** | checked | Makes this the active connection. Uncheck demo-simulator’s box when you switch. |
 
 Click **Add PLC** (new) or **Save \<label\>** (existing). Success text: **Saved and connecting.**
@@ -192,6 +195,20 @@ For each row: set **Address** → **Save**. Success: **Saved** plus that name.
 
 ---
 
+## Modbus TLS (optional)
+
+Use when the PLC or gateway supports Modbus TCP Security / TLS (not the cleartext demo simulator).
+
+| Field | Example | Where to get it |
+| ----- | ------- | --------------- |
+| Protocol | Modbus TLS | Gateway / PLC docs |
+| Port | `802` (example) | Vendor TLS listen port — confirm; not always `502` |
+| CA / trust PEM path | `/certs/ca.pem` | Plant CA that signed the gateway cert |
+| Client cert / key | `/certs/client.pem`, `/certs/client.key` | If the gateway requires mutual TLS |
+| Verify server certificate | on | Lab-only to disable |
+
+Keep **demo-simulator** on cleartext **Modbus TCP**. Do not point the simulator at Modbus TLS.
+
 ## OPC UA (optional)
 
 If **Protocol** is **OPC UA**:
@@ -201,6 +218,10 @@ If **Protocol** is **OPC UA**:
 | Host | `192.168.10.50` | OPC UA server endpoint host |
 | Port | `4840` | Common OPC UA port (confirm in server config) |
 | Unit id | `1` | Often unused for OPC UA; keep `1` unless your build documents otherwise |
+| Security mode | `SignAndEncrypt` | Plant default; `None` is lab-only and shows a warning |
+| Security policy | `Basic256Sha256` | Match the server endpoint |
+| Client cert / key / CA paths | `/certs/...` | Application instance certificate + private key; CA trusts the server |
+| OPC username / password file | optional | Password is a file path on the API host, not stored in the DB |
 | Each register **Node id** | `ns=2;s=Hoist.HeightMm` | From OPC UA address space / UA Expert / PLC tag export |
 
 Fill **Node id** on each register row (Config shows that field when an OPC UA connection exists), then **Save**. See [DRIVERS.md](./DRIVERS.md).

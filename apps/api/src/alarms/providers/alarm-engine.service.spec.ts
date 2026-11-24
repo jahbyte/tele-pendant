@@ -3,7 +3,10 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { AlarmEngineService } from './alarm-engine.service';
+import {
+  AlarmEngineService,
+  parseAlarmHistoryHours,
+} from './alarm-engine.service';
 
 describe('AlarmEngineService', () => {
   const definitions = {
@@ -397,8 +400,104 @@ describe('AlarmEngineService', () => {
     events.findOne.mockResolvedValue({ id: 'e1', state: 'active' });
     await service.evaluate();
     expect(events.save).toHaveBeenCalledWith(
-      expect.objectContaining({ state: 'cleared' }),
+      expect.objectContaining({
+        state: 'cleared',
+        clearedAt: expect.any(Date),
+      }),
     );
+  });
+
+  it('parses classic history windows', () => {
+    expect(parseAlarmHistoryHours(undefined)).toBe(24);
+    expect(parseAlarmHistoryHours('24')).toBe(24);
+    expect(parseAlarmHistoryHours(168)).toBe(168);
+    expect(parseAlarmHistoryHours('720')).toBe(720);
+    expect(parseAlarmHistoryHours('99')).toBe(24);
+  });
+
+  it('lists history, ranks frequency, and builds CSV', async () => {
+    const raised = new Date('2026-01-01T10:00:00.000Z');
+    const cleared = new Date('2026-01-01T10:05:00.000Z');
+    events.find.mockResolvedValue([
+      {
+        createdAt: raised,
+        clearedAt: cleared,
+        state: 'cleared',
+        value: 1,
+        definition: { name: 'E-Stop', severity: 'critical' },
+      },
+      {
+        createdAt: raised,
+        clearedAt: null,
+        state: 'active',
+        value: 0,
+        definition: { name: 'E-Stop', severity: 'critical' },
+      },
+      {
+        createdAt: '2026-01-01T09:00:00.000Z',
+        clearedAt: '',
+        state: 'acked',
+        value: 2,
+        definition: { name: 'Overload', severity: 'warning' },
+      },
+      {
+        createdAt: raised,
+        clearedAt: '2026-01-01T11:00:00.000Z',
+        state: 'cleared',
+        value: 3,
+        definition: { name: 'Weird,Name', severity: 'info' },
+      },
+      {
+        createdAt: null,
+        clearedAt: null,
+        state: 'active',
+        value: 9,
+        definition: { name: '  ', severity: '' },
+      },
+      {
+        createdAt: raised,
+        clearedAt: null,
+        state: 'active',
+        value: 4,
+        definition: {
+          name: 'Quoted "alarm"',
+          severity: 'info',
+        },
+      },
+      {
+        createdAt: raised,
+        clearedAt: null,
+        state: 'active',
+        value: 5,
+        definition: undefined,
+      },
+    ]);
+
+    const history = await service.listHistory();
+    expect(events.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 500,
+        order: { createdAt: 'DESC' },
+      }),
+    );
+    expect(history).toHaveLength(7);
+
+    const summary = await service.summarize();
+    expect(summary[0]).toEqual({
+      name: 'E-Stop',
+      severity: 'critical',
+      count: 2,
+    });
+    expect(summary.map((row) => row.name)).toContain('unknown');
+
+    const csv = await service.historyCsv();
+    expect(csv).toContain('Raised,Cleared,Name,Severity,State,Value');
+    expect(csv).toContain('E-Stop');
+    expect(csv).toContain('"Weird,Name"');
+    expect(csv).toContain(raised.toISOString());
+    expect(csv).toContain(cleared.toISOString());
+    expect(csv).toContain('2026-01-01T11:00:00.000Z');
+    expect(csv).toContain('"Quoted ""alarm"""');
   });
 
   it('unshelves a shelved alarm and rejects others', async () => {

@@ -13,7 +13,7 @@ import {
   type AlarmSeverity,
   tryParseAlarmSeverity,
 } from '@tele-pendant/shared';
-import { Repository } from 'typeorm';
+import { MoreThan, Repository } from 'typeorm';
 import { AuditActor, auditWriteFields } from '../../common/audit-actor';
 import { AuditService } from '../../audit/providers/audit.service';
 import { PlcService } from '../../plc/providers/plc.service';
@@ -21,6 +21,19 @@ import { RegisterMap } from '../../registers/entities/register-map.entity';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AlarmDefinition } from '../entities/alarm-definition.entity';
 import { AlarmEvent } from '../entities/alarm-event.entity';
+
+/** Ops history window: 24h, 7d, or 30d. */
+export function parseAlarmHistoryHours(raw?: string | number): number {
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (n === 168 || n === 720) return n;
+  return 24;
+}
+
+export type AlarmFrequencyRow = {
+  name: string;
+  severity: string;
+  count: number;
+};
 
 @Injectable()
 export class AlarmEngineService implements OnModuleInit {
@@ -205,6 +218,7 @@ export class AlarmEngineService implements OnModuleInit {
     });
     for (const event of rows) {
       event.state = 'cleared';
+      event.clearedAt = new Date();
       await this.events.save(event);
     }
     this.activeByDef.delete(definitionId);
@@ -234,6 +248,62 @@ export class AlarmEngineService implements OnModuleInit {
       order: { createdAt: 'DESC' },
       take: 100,
     });
+  }
+
+  /** Past + open alarms raised inside the window (classic history). */
+  async listHistory(hours = 24): Promise<AlarmEvent[]> {
+    const since = new Date(Date.now() - hours * 3_600_000);
+    return this.events.find({
+      where: { createdAt: MoreThan(since) },
+      order: { createdAt: 'DESC' },
+      take: 500,
+      relations: { definition: true },
+    });
+  }
+
+  /** Which alarms happened most often in the window. */
+  async summarize(hours = 24): Promise<AlarmFrequencyRow[]> {
+    const rows = await this.listHistory(hours);
+    const map = new Map<string, AlarmFrequencyRow>();
+    for (const row of rows) {
+      const name = row.definition?.name?.trim() || 'unknown';
+      const severity = row.definition?.severity || 'info';
+      const key = `${name}\0${severity}`;
+      const cur = map.get(key);
+      if (cur) cur.count += 1;
+      else map.set(key, { name, severity, count: 1 });
+    }
+    return [...map.values()].sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+    );
+  }
+
+  /** CSV report of history for the window. */
+  async historyCsv(hours = 24): Promise<string> {
+    const rows = await this.listHistory(hours);
+    const escape = (value: string) => {
+      if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+      return value;
+    };
+    const asIso = (value: Date | string | null | undefined): string => {
+      if (value == null || value === '') return '';
+      if (value instanceof Date) return value.toISOString();
+      return String(value);
+    };
+    const lines = ['Raised,Cleared,Name,Severity,State,Value'];
+    for (const row of rows) {
+      lines.push(
+        [
+          asIso(row.createdAt),
+          asIso(row.clearedAt),
+          escape(row.definition?.name ?? ''),
+          escape(row.definition?.severity ?? ''),
+          escape(row.state),
+          String(row.value),
+        ].join(','),
+      );
+    }
+    return `${lines.join('\n')}\n`;
   }
 
   /** TP-10: Audit Resource must be the definition name, not the event UUID. */
@@ -338,6 +408,7 @@ export class AlarmEngineService implements OnModuleInit {
         const event = await this.events.findOne({ where: { id: existingId } });
         if (event) {
           event.state = 'cleared';
+          event.clearedAt = new Date();
           await this.events.save(event);
           this.gateway.broadcast('alarm.event', event);
         }

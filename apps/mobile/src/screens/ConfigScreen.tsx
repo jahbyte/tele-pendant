@@ -50,6 +50,7 @@ type PlcHealth = {
   host: string | null;
   port: number | null;
   lastError: string | null;
+  security?: string | null;
 };
 
 function ConfigCheckRow({
@@ -117,7 +118,9 @@ function PlcConnectionStatus({
   if (health.connected) {
     return (
       <View className="mb-2 self-start rounded-md bg-emerald-600 px-2.5 py-1">
-        <Text className="text-xs font-semibold text-white">Connected</Text>
+        <Text className="text-xs font-semibold text-white">
+          Connected{health.security ? ` · ${health.security}` : ''}
+        </Text>
       </View>
     );
   }
@@ -867,7 +870,15 @@ function PlcForm({
     port: number;
     unitId: number;
     enabled: boolean;
-    protocol: 'modbus-tcp' | 'opcua';
+    protocol: PlcConnection['protocol'];
+    tlsCaPath?: string | null;
+    tlsCertPath?: string | null;
+    tlsKeyPath?: string | null;
+    tlsRejectUnauthorized?: boolean;
+    opcSecurityMode?: PlcConnection['opcSecurityMode'];
+    opcSecurityPolicy?: string | null;
+    opcUsername?: string | null;
+    opcPasswordFile?: string | null;
   }) => Promise<void>;
 }) {
   const [label, setLabel] = useState(row?.label ?? '');
@@ -875,15 +886,122 @@ function PlcForm({
   const [port, setPort] = useState(String(row?.port ?? 502));
   const [unitId, setUnitId] = useState(String(row?.unitId ?? 1));
   const [enabled, setEnabled] = useState(row?.enabled ?? false);
-  const [protocol, setProtocol] = useState<'modbus-tcp' | 'opcua'>(
-    row?.protocol ?? 'modbus-tcp',
+  const [protocol, setProtocol] = useState<
+    NonNullable<PlcConnection['protocol']>
+  >(row?.protocol ?? 'modbus-tcp');
+  const [tlsCaPath, setTlsCaPath] = useState(row?.tlsCaPath ?? '');
+  const [tlsCertPath, setTlsCertPath] = useState(row?.tlsCertPath ?? '');
+  const [tlsKeyPath, setTlsKeyPath] = useState(row?.tlsKeyPath ?? '');
+  const [tlsRejectUnauthorized, setTlsRejectUnauthorized] = useState(
+    row?.tlsRejectUnauthorized !== false,
   );
+  const [opcSecurityMode, setOpcSecurityMode] = useState<
+    NonNullable<PlcConnection['opcSecurityMode']>
+  >(row?.opcSecurityMode ?? 'SignAndEncrypt');
+  const [opcSecurityPolicy, setOpcSecurityPolicy] = useState(
+    row?.opcSecurityPolicy ?? 'Basic256Sha256',
+  );
+  const [opcUsername, setOpcUsername] = useState(row?.opcUsername ?? '');
+  const [opcPasswordFile, setOpcPasswordFile] = useState(
+    row?.opcPasswordFile ?? '',
+  );
+  const showTlsFields = protocol === 'modbus-tls' || protocol === 'opcua';
+  const showOpcFields = protocol === 'opcua';
+  const showCleartextWarning =
+    protocol === 'modbus-tcp' && !(row?.isSimulator ?? false);
   return (
     <>
       <Field label="Label" value={label} onChangeText={setLabel} />
       <Field label="Host" value={host} onChangeText={setHost} />
       <Field label="Port" value={port} onChangeText={setPort} />
       <Field label="Unit" value={unitId} onChangeText={setUnitId} />
+      <SelectField
+        label="Protocol"
+        value={protocol}
+        options={[
+          { value: 'modbus-tcp', label: 'Modbus TCP' },
+          { value: 'modbus-tls', label: 'Modbus TLS' },
+          { value: 'opcua', label: 'OPC UA' },
+        ]}
+        onChange={(value) =>
+          setProtocol(
+            value === 'opcua'
+              ? 'opcua'
+              : value === 'modbus-tls'
+                ? 'modbus-tls'
+                : 'modbus-tcp',
+          )
+        }
+      />
+      {showCleartextWarning ? (
+        <Text className="my-2 text-sm text-destructive" numberOfLines={4}>
+          Unencrypted — use only on an isolated OT network or VPN; prefer OPC UA
+          or Modbus TLS for plant links.
+        </Text>
+      ) : null}
+      {showTlsFields ? (
+        <>
+          <Field
+            label="CA / trust PEM path"
+            value={tlsCaPath}
+            onChangeText={setTlsCaPath}
+          />
+          <Field
+            label="Client cert PEM path"
+            value={tlsCertPath}
+            onChangeText={setTlsCertPath}
+          />
+          <Field
+            label="Client key PEM path"
+            value={tlsKeyPath}
+            onChangeText={setTlsKeyPath}
+          />
+          <ConfigCheckRow
+            label="Verify server certificate"
+            checked={tlsRejectUnauthorized}
+            onChange={setTlsRejectUnauthorized}
+          />
+        </>
+      ) : null}
+      {showOpcFields ? (
+        <>
+          <SelectField
+            label="OPC security mode"
+            value={opcSecurityMode}
+            options={[
+              { value: 'None', label: 'None (lab only)' },
+              { value: 'Sign', label: 'Sign' },
+              { value: 'SignAndEncrypt', label: 'Sign and Encrypt' },
+            ]}
+            onChange={(value) =>
+              setOpcSecurityMode(
+                value === 'None' || value === 'Sign' ? value : 'SignAndEncrypt',
+              )
+            }
+          />
+          {opcSecurityMode === 'None' ? (
+            <Text className="my-2 text-sm text-destructive" numberOfLines={3}>
+              None/None is for lab use only. Prefer SignAndEncrypt with
+              certificates for plant links.
+            </Text>
+          ) : null}
+          <Field
+            label="Security policy"
+            value={opcSecurityPolicy}
+            onChangeText={setOpcSecurityPolicy}
+          />
+          <Field
+            label="OPC username"
+            value={opcUsername}
+            onChangeText={setOpcUsername}
+          />
+          <Field
+            label="OPC password file path"
+            value={opcPasswordFile}
+            onChangeText={setOpcPasswordFile}
+          />
+        </>
+      ) : null}
       <ConfigCheckRow
         label="Use this PLC"
         checked={enabled}
@@ -897,15 +1015,6 @@ function PlcForm({
           healthLoading={healthLoading}
         />
       ) : null}
-      <SelectField
-        label="Protocol"
-        value={protocol}
-        options={[
-          { value: 'modbus-tcp', label: 'Modbus TCP' },
-          { value: 'opcua', label: 'OPC UA' },
-        ]}
-        onChange={setProtocol}
-      />
       <Btn
         onPress={async () => {
           if (enabled) {
@@ -923,6 +1032,14 @@ function PlcForm({
             unitId: Number(unitId),
             enabled,
             protocol,
+            tlsCaPath: tlsCaPath || null,
+            tlsCertPath: tlsCertPath || null,
+            tlsKeyPath: tlsKeyPath || null,
+            tlsRejectUnauthorized,
+            opcSecurityMode: showOpcFields ? opcSecurityMode : null,
+            opcSecurityPolicy: showOpcFields ? opcSecurityPolicy || null : null,
+            opcUsername: showOpcFields ? opcUsername || null : null,
+            opcPasswordFile: showOpcFields ? opcPasswordFile || null : null,
           });
         }}
       >

@@ -38,6 +38,7 @@ import { OperatorScreen } from './screens/OperatorScreen';
 import { OpsScreen } from './screens/OpsScreen';
 import { BrandLockup } from './brand';
 import { MediaScreen } from './screens/MediaScreen';
+import { VoiceListenButton } from './voice-listen-button';
 import { AssistantScreen } from './screens/AssistantScreen';
 import { FaceScreen } from './screens/FaceScreen';
 import { ConfigScreen } from './screens/ConfigScreen';
@@ -324,6 +325,7 @@ export function AppShell({
             ),
             headerRight: () => (
               <View className="mr-2 flex-row items-center gap-1">
+                <VoiceListenButton token={token} dark={dark} />
                 <ControlLeaseHeaderControls dark={dark} />
                 <TourBar screen={tourScreen} compact />
                 <ThemeToggle />

@@ -1,10 +1,21 @@
 export type ModbusRegisterKind = 'coil' | 'discrete' | 'holding' | 'input';
 
+export interface ModbusTlsOptions {
+  /** Use TLS (Modbus TCP Security / MBAPS-style socket). */
+  enabled: boolean;
+  caPath?: string | null;
+  certPath?: string | null;
+  keyPath?: string | null;
+  /** When false, do not verify the peer certificate (lab only). */
+  rejectUnauthorized?: boolean;
+}
+
 export interface ModbusConnectionOptions {
   host: string;
   port: number;
   unitId: number;
   timeoutMs?: number;
+  tls?: ModbusTlsOptions;
 }
 
 export interface ModbusDriver {

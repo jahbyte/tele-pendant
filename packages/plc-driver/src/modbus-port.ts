@@ -15,6 +15,15 @@ export class ModbusPort implements PlcPort {
       port: options.port,
       unitId: options.unitId ?? 1,
       timeoutMs: options.timeoutMs,
+      tls: options.modbusTls
+        ? {
+            enabled: true,
+            caPath: options.tlsCaPath,
+            certPath: options.tlsCertPath,
+            keyPath: options.tlsKeyPath,
+            rejectUnauthorized: options.tlsRejectUnauthorized !== false,
+          }
+        : undefined,
     });
   }
 

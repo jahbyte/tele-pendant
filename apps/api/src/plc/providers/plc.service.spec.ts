@@ -173,6 +173,73 @@ describe('PlcService configuration', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('rejects OPC UA SignAndEncrypt without client cert paths', async () => {
+    connections.findOne.mockResolvedValue(null);
+    await expect(
+      service.saveConnection({
+        label: 'plant-opc',
+        host: '10.0.0.8',
+        port: 4840,
+        unitId: 1,
+        enabled: false,
+        protocol: 'opcua',
+        opcSecurityMode: 'SignAndEncrypt',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('saves modbus-tls and opcua security fields', async () => {
+    connections.findOne.mockResolvedValue(null);
+    connections.findOneBy.mockImplementation(async () => null);
+    connections.save.mockImplementation(async (value: { id?: string }) => {
+      if (!value.id) value.id = 'created';
+      return value;
+    });
+    jest.spyOn(service, 'connect').mockResolvedValue({
+      connected: true,
+      connectionId: 'created',
+      label: 'tls-gw',
+      host: '10.0.0.8',
+      port: 802,
+      lastError: null,
+      security: 'modbus-tls',
+    });
+    const tlsSaved = await service.saveConnection({
+      label: 'tls-gw',
+      host: '10.0.0.8',
+      port: 802,
+      unitId: 1,
+      enabled: true,
+      protocol: 'modbus-tls',
+      tlsCaPath: '/certs/ca.pem',
+      tlsCertPath: '/certs/client.pem',
+      tlsKeyPath: '/certs/client.key',
+      tlsRejectUnauthorized: true,
+    });
+    expect(tlsSaved.protocol).toBe('modbus-tls');
+    expect(tlsSaved.tlsCaPath).toBe('/certs/ca.pem');
+
+    connections.findOne.mockResolvedValue(null);
+    const opcSaved = await service.saveConnection({
+      label: 'opc-plant',
+      host: '10.0.0.9',
+      port: 4840,
+      unitId: 1,
+      enabled: false,
+      protocol: 'opcua',
+      opcSecurityMode: 'SignAndEncrypt',
+      opcSecurityPolicy: 'Basic256Sha256',
+      tlsCertPath: '/certs/client.pem',
+      tlsKeyPath: '/certs/client.key',
+      tlsCaPath: '/certs/ca.pem',
+      opcUsername: 'ops',
+      opcPasswordFile: '/run/secrets/opc',
+    });
+    expect(opcSaved.protocol).toBe('opcua');
+    expect(opcSaved.opcSecurityMode).toBe('SignAndEncrypt');
+    expect(opcSaved.opcPasswordFile).toBe('/run/secrets/opc');
+  });
+
   it('reports a connect failure after the row is saved', async () => {
     connections.findOne.mockResolvedValue(null);
     connections.findOneBy.mockResolvedValue(null);

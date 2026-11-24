@@ -15,6 +15,10 @@ import { TcpModbusDriver } from '@tele-pendant/modbus-core';
 import { OpcUaPort } from '@tele-pendant/plc-driver';
 import { Repository } from 'typeorm';
 import { RegisterMap } from '../../registers/entities/register-map.entity';
+import type {
+  OpcSecurityMode,
+  PlcProtocol,
+} from '../entities/plc-connection.entity';
 import { PlcConnection } from '../entities/plc-connection.entity';
 
 export interface PlcHealth {
@@ -24,14 +28,34 @@ export interface PlcHealth {
   host: string | null;
   port: number | null;
   lastError: string | null;
+  /** Active transport, e.g. `opcua SignAndEncrypt` or `modbus-tls`. */
+  security?: string | null;
 }
+
+export type SavePlcConnectionInput = {
+  id?: string;
+  label: string;
+  host: string;
+  port: number;
+  unitId: number;
+  enabled: boolean;
+  protocol?: PlcProtocol;
+  tlsCaPath?: string | null;
+  tlsCertPath?: string | null;
+  tlsKeyPath?: string | null;
+  tlsRejectUnauthorized?: boolean;
+  opcSecurityMode?: OpcSecurityMode | null;
+  opcSecurityPolicy?: string | null;
+  opcUsername?: string | null;
+  opcPasswordFile?: string | null;
+};
 
 @Injectable()
 export class PlcService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PlcService.name);
   private readonly driver = new TcpModbusDriver();
   private readonly opc = new OpcUaPort();
-  private activeProtocol: 'modbus-tcp' | 'opcua' = 'modbus-tcp';
+  private activeProtocol: PlcProtocol = 'modbus-tcp';
   private active: PlcConnection | null = null;
   private lastConnectionId: string | null = null;
   private lastError: string | null = null;
@@ -112,7 +136,17 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
       host: this.active?.host ?? null,
       port: this.active?.port ?? null,
       lastError: this.lastError,
+      security: this.securityLabel(),
     };
+  }
+
+  private securityLabel(): string | null {
+    if (!this.active) return null;
+    if (this.activeProtocol === 'opcua') {
+      const mode = this.active.opcSecurityMode ?? 'SignAndEncrypt';
+      return `opcua ${mode}`;
+    }
+    return this.activeProtocol;
   }
 
   /** A successful read or write is the only thing that counts as connected. */
@@ -129,15 +163,7 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
     return this.connections.find({ order: { createdAt: 'ASC' } });
   }
 
-  async saveConnection(input: {
-    id?: string;
-    label: string;
-    host: string;
-    port: number;
-    unitId: number;
-    enabled: boolean;
-    protocol?: 'modbus-tcp' | 'opcua';
-  }): Promise<PlcConnection> {
+  async saveConnection(input: SavePlcConnectionInput): Promise<PlcConnection> {
     const label = input.label.trim();
     const host = input.host.trim();
     if (!label || !host) {
@@ -150,6 +176,24 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Unit id must be from 0 to 255');
     }
 
+    const protocol = this.normalizeProtocol(input.protocol);
+    if (protocol === 'modbus-tls') {
+      if (!input.tlsCaPath?.trim() && input.tlsRejectUnauthorized !== false) {
+        // CA optional when rejectUnauthorized is false (lab); otherwise warn via connect
+      }
+    }
+    if (protocol === 'opcua') {
+      const mode = input.opcSecurityMode ?? 'SignAndEncrypt';
+      if (
+        mode !== 'None' &&
+        (!input.tlsCertPath?.trim() || !input.tlsKeyPath?.trim())
+      ) {
+        throw new BadRequestException(
+          'OPC UA Sign/SignAndEncrypt requires client certificate and private key paths',
+        );
+      }
+    }
+
     let row: PlcConnection;
     if (input.id) {
       const existing = await this.connections.findOneBy({ id: input.id });
@@ -159,6 +203,7 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
       row = this.connections.create({
         isSimulator: false,
         pollMs: 250,
+        tlsRejectUnauthorized: true,
       });
     }
 
@@ -174,7 +219,24 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
     row.port = input.port;
     row.unitId = input.unitId;
     row.enabled = input.enabled;
-    row.protocol = input.protocol === 'opcua' ? 'opcua' : 'modbus-tcp';
+    row.protocol = protocol;
+    row.tlsCaPath = this.nullablePath(input.tlsCaPath);
+    row.tlsCertPath = this.nullablePath(input.tlsCertPath);
+    row.tlsKeyPath = this.nullablePath(input.tlsKeyPath);
+    if (typeof input.tlsRejectUnauthorized === 'boolean') {
+      row.tlsRejectUnauthorized = input.tlsRejectUnauthorized;
+    }
+    row.opcSecurityMode =
+      protocol === 'opcua'
+        ? (input.opcSecurityMode ?? 'SignAndEncrypt')
+        : (input.opcSecurityMode ?? row.opcSecurityMode ?? null);
+    row.opcSecurityPolicy =
+      this.nullablePath(input.opcSecurityPolicy) ??
+      (protocol === 'opcua'
+        ? 'Basic256Sha256'
+        : (row.opcSecurityPolicy ?? null));
+    row.opcUsername = this.nullablePath(input.opcUsername);
+    row.opcPasswordFile = this.nullablePath(input.opcPasswordFile);
     const saved = await this.connections.save(row);
 
     if (input.enabled) {
@@ -300,6 +362,14 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
         await this.opc.connect({
           host: connection.host,
           port: connection.port,
+          tlsCaPath: connection.tlsCaPath,
+          tlsCertPath: connection.tlsCertPath,
+          tlsKeyPath: connection.tlsKeyPath,
+          tlsRejectUnauthorized: connection.tlsRejectUnauthorized,
+          opcSecurityMode: connection.opcSecurityMode ?? 'SignAndEncrypt',
+          opcSecurityPolicy: connection.opcSecurityPolicy ?? 'Basic256Sha256',
+          opcUsername: connection.opcUsername,
+          opcPasswordFile: connection.opcPasswordFile,
         });
         if (generation !== this.connectGeneration) {
           await this.opc.disconnect();
@@ -307,16 +377,27 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
         }
         this.activeProtocol = 'opcua';
       } else {
+        const useTls = connection.protocol === 'modbus-tls';
         await this.driver.connect({
           host: connection.host,
           port: connection.port,
           unitId: connection.unitId,
           timeoutMs: 1000,
+          tls: useTls
+            ? {
+                enabled: true,
+                caPath: connection.tlsCaPath,
+                certPath: connection.tlsCertPath,
+                keyPath: connection.tlsKeyPath,
+                rejectUnauthorized: connection.tlsRejectUnauthorized !== false,
+              }
+            : undefined,
         });
         if (generation !== this.connectGeneration) {
           await this.driver.disconnect();
           return this.health();
         }
+        this.activeProtocol = useTls ? 'modbus-tls' : 'modbus-tcp';
       }
       this.active = connection;
       this.lastConnectionId = connection.id;
@@ -389,5 +470,17 @@ export class PlcService implements OnModuleInit, OnModuleDestroy {
 
   async writeHolding(address: number, value: number): Promise<void> {
     await this.getDriver().writeRegister(address, value);
+  }
+
+  private normalizeProtocol(protocol?: PlcProtocol): PlcProtocol {
+    if (protocol === 'opcua') return 'opcua';
+    if (protocol === 'modbus-tls') return 'modbus-tls';
+    return 'modbus-tcp';
+  }
+
+  private nullablePath(value?: string | null): string | null {
+    if (value == null) return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
   }
 }

@@ -1,19 +1,28 @@
-import { ScrollView, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, Share, Text, View } from 'react-native';
 import Svg, { Polyline, Text as SvgText } from 'react-native-svg';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Pause, RefreshCw } from 'lucide-react-native';
+import { Check, Download, Pause, RefreshCw } from 'lucide-react-native';
 import { canShelveAlarms, type UserRole } from '@tele-pendant/shared';
-import { apiGet, apiPost } from '../api';
+import { apiGet, apiGetText, apiPost } from '../api';
 import { normalizeAlarmSeverity } from '@tele-pendant/shared';
 import { useLocale } from '../locale';
 import { HelpTip } from '../tour';
-import { Btn, BtnText, Hint, LinkText, Section } from '../ui';
+import { Btn, BtnText, Hint, LinkText, Section, showErrorFrom } from '../ui';
 
 type Alarm = {
   id: string;
   state: string;
   value: number;
   definition: { name: string; severity: string };
+  createdAt?: string;
+  clearedAt?: string | null;
+};
+
+type AlarmFrequencyRow = {
+  name: string;
+  severity: string;
+  count: number;
 };
 
 type TrendPoint = { value: number; createdAt: string };
@@ -24,6 +33,16 @@ type Diagnostics = {
   uptimeSec: number;
 };
 
+const HISTORY_WINDOWS = [24, 168, 720] as const;
+type HistoryHours = (typeof HISTORY_WINDOWS)[number];
+
+function formatAlarmTime(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 export function OpsScreen({
   token,
   userRole,
@@ -33,10 +52,22 @@ export function OpsScreen({
 }) {
   const { t } = useLocale();
   const mayShelve = canShelveAlarms(userRole ?? 'operator');
+  const [hours, setHours] = useState<HistoryHours>(24);
   const alarms = useQuery({
     queryKey: ['alarms', token],
     queryFn: () => apiGet<Alarm[]>('/alarms', token),
     refetchInterval: 2000,
+  });
+  const history = useQuery({
+    queryKey: ['alarm-history', token, hours],
+    queryFn: () => apiGet<Alarm[]>(`/alarms/history?hours=${hours}`, token),
+    refetchInterval: 5000,
+  });
+  const frequency = useQuery({
+    queryKey: ['alarm-summary', token, hours],
+    queryFn: () =>
+      apiGet<AlarmFrequencyRow[]>(`/alarms/summary?hours=${hours}`, token),
+    refetchInterval: 5000,
   });
   const trendKeys = useQuery({
     queryKey: ['trend-keys', token],
@@ -53,6 +84,25 @@ export function OpsScreen({
   });
   const plc = diagnostics.data?.plc;
   const safety = diagnostics.data?.safety;
+
+  const windowLabel = (value: HistoryHours) =>
+    value === 24
+      ? t('alarmWindow24h')
+      : value === 168
+        ? t('alarmWindow7d')
+        : t('alarmWindow30d');
+
+  async function shareHistoryCsv() {
+    try {
+      const csv = await apiGetText(`/alarms/history.csv?hours=${hours}`, token);
+      await Share.share({
+        message: csv,
+        title: t('alarmHistory'),
+      });
+    } catch (err) {
+      showErrorFrom(err, 'Export failed', 'Ops');
+    }
+  }
 
   return (
     <ScrollView
@@ -133,6 +183,71 @@ export function OpsScreen({
           </View>
         </HelpTip>
       ))}
+
+      <View className="mb-3 mt-2 flex-row flex-wrap gap-2">
+        {HISTORY_WINDOWS.map((value) => {
+          const active = hours === value;
+          return (
+            <Pressable
+              key={value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              className={`min-h-9 rounded-md border px-3 py-1.5 ${
+                active ? 'border-primary bg-primary' : 'border-border bg-card'
+              }`}
+              onPress={() => setHours(value)}
+            >
+              <Text
+                className={`text-sm font-medium ${
+                  active ? 'text-primary-foreground' : 'text-foreground'
+                }`}
+              >
+                {windowLabel(value)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Btn onPress={() => void shareHistoryCsv()}>
+        <Download size={16} color="#041018" />
+        <BtnText>{t('downloadCsv')}</BtnText>
+      </Btn>
+
+      <HelpTip id="tour.ops.history">
+        <>
+          <Section>{t('alarmHistory')}</Section>
+          {(history.data ?? []).length === 0 ? (
+            <Hint>{t('noAlarmHistory')}</Hint>
+          ) : null}
+          {(history.data ?? []).map((row) => (
+            <Hint key={row.id}>
+              {formatAlarmTime(row.createdAt)} ·{' '}
+              {normalizeAlarmSeverity(row.definition?.severity)}{' '}
+              {row.definition?.name ?? '—'} — {row.state} (value {row.value}
+              {row.clearedAt
+                ? `; ${t('cleared')} ${formatAlarmTime(row.clearedAt)}`
+                : ''}
+              )
+            </Hint>
+          ))}
+        </>
+      </HelpTip>
+
+      <HelpTip id="tour.ops.frequency">
+        <>
+          <Section>{t('alarmFrequency')}</Section>
+          {(frequency.data ?? []).length === 0 ? (
+            <Hint>{t('noAlarmFrequency')}</Hint>
+          ) : null}
+          {(frequency.data ?? []).map((row) => (
+            <Hint key={`${row.name}:${row.severity}`}>
+              [{normalizeAlarmSeverity(row.severity)}] {row.name} — {t('count')}{' '}
+              {row.count}
+            </Hint>
+          ))}
+        </>
+      </HelpTip>
+
       <HelpTip id="tour.ops.trends">
         <>
           <Section>{t('trends')}</Section>
@@ -144,7 +259,13 @@ export function OpsScreen({
           ))}
         </>
       </HelpTip>
-      <Btn onPress={() => void alarms.refetch()}>
+      <Btn
+        onPress={() => {
+          void alarms.refetch();
+          void history.refetch();
+          void frequency.refetch();
+        }}
+      >
         <RefreshCw size={16} color="#041018" />
         <BtnText>Refresh</BtnText>
       </Btn>
@@ -197,12 +318,20 @@ function TrendChart({
       return `${x},${y}`;
     })
     .join(' ');
+  const last = values[values.length - 1];
+  const unit = /speedPct/i.test(seriesKey) ? ' %' : '';
   return (
     <>
       <Hint>
-        {seriesKey}: {values[values.length - 1]} ({min} to {max})
+        {seriesKey}: {last}
+        {unit}
       </Hint>
-      <Svg width="100%" height={220} viewBox={`0 0 ${width} ${height}`}>
+      <Svg
+        width="100%"
+        height={220}
+        viewBox={`0 0 ${width} ${height}`}
+        accessibilityLabel={`${seriesKey} from ${min} to ${max}`}
+      >
         <SvgText x="4" y="20" fontSize="11" fill="#9aa0a6">
           {String(max)}
         </SvgText>

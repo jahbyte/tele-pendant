@@ -1,9 +1,22 @@
+import { readFileSync } from 'node:fs';
 import type {
   ModbusShapedDriver,
+  OpcSecurityMode,
   PlcConnectOptions,
   PlcPoint,
   PlcPort,
 } from './port';
+
+export type OpcUaSecurityOptions = {
+  securityMode: OpcSecurityMode;
+  securityPolicy: string;
+  certificateFile?: string | null;
+  privateKeyFile?: string | null;
+  serverCertificateFile?: string | null;
+  rejectUnauthorized?: boolean;
+  username?: string | null;
+  passwordFile?: string | null;
+};
 
 export interface OpcStatus {
   name?: string;
@@ -61,6 +74,7 @@ export class OpcUaPort implements PlcPort {
   constructor(
     private readonly openSession: (
       endpoint: string,
+      security: OpcUaSecurityOptions,
     ) => Promise<OpcSession> = openNodeOpcuaSession,
   ) {}
 
@@ -70,8 +84,27 @@ export class OpcUaPort implements PlcPort {
 
   async connect(options: PlcConnectOptions): Promise<void> {
     await this.disconnect();
+    const mode = (options.opcSecurityMode ??
+      'SignAndEncrypt') as OpcSecurityMode;
+    const policy = options.opcSecurityPolicy?.trim() || 'Basic256Sha256';
+    if (mode !== 'None') {
+      if (!options.tlsCertPath?.trim() || !options.tlsKeyPath?.trim()) {
+        throw new Error(
+          'OPC UA Sign/SignAndEncrypt requires tlsCertPath and tlsKeyPath (client certificate and private key)',
+        );
+      }
+    }
     const endpoint = `opc.tcp://${options.host}:${options.port}`;
-    this.session = await this.openSession(endpoint);
+    this.session = await this.openSession(endpoint, {
+      securityMode: mode,
+      securityPolicy: policy,
+      certificateFile: options.tlsCertPath,
+      privateKeyFile: options.tlsKeyPath,
+      serverCertificateFile: options.tlsCaPath,
+      rejectUnauthorized: options.tlsRejectUnauthorized !== false,
+      username: options.opcUsername,
+      passwordFile: options.opcPasswordFile,
+    });
   }
 
   async disconnect(): Promise<void> {
@@ -188,14 +221,41 @@ export class OpcUaPort implements PlcPort {
   }
 }
 
-async function openNodeOpcuaSession(endpoint: string): Promise<OpcSession> {
+function resolveMessageSecurityMode(
+  mode: OpcSecurityMode,
+  MessageSecurityMode: Record<string, number>,
+): number {
+  if (mode === 'None') return MessageSecurityMode.None;
+  if (mode === 'Sign') return MessageSecurityMode.Sign;
+  return MessageSecurityMode.SignAndEncrypt;
+}
+
+function resolveSecurityPolicy(
+  policy: string,
+  SecurityPolicy: Record<string, string>,
+): string {
+  const key = policy.trim();
+  if (key in SecurityPolicy) return SecurityPolicy[key]!;
+  const withPrefix = `SecurityPolicy_${key}`;
+  if (withPrefix in SecurityPolicy) return SecurityPolicy[withPrefix]!;
+  return SecurityPolicy.Basic256Sha256 ?? key;
+}
+
+async function openNodeOpcuaSession(
+  endpoint: string,
+  security: OpcUaSecurityOptions,
+): Promise<OpcSession> {
   const spec = 'node-opcua';
   const opc = (await import(spec)) as {
     OPCUAClient: {
-      create: (options: { endpointMustExist: boolean }) => {
+      create: (options: Record<string, unknown>) => {
         connect: (url: string) => Promise<void>;
         disconnect: () => Promise<void>;
-        createSession: () => Promise<{
+        createSession: (identity?: {
+          type: number;
+          userName?: string;
+          password?: string;
+        }) => Promise<{
           read: (req: { nodeId: string; attributeId: number }) => Promise<{
             value?: { value?: unknown };
             statusCode?: OpcStatus;
@@ -211,10 +271,57 @@ async function openNodeOpcuaSession(endpoint: string): Promise<OpcSession> {
     };
     AttributeIds: { Value: number };
     DataType: { Boolean: unknown; Double: unknown };
+    MessageSecurityMode: Record<string, number>;
+    SecurityPolicy: Record<string, string>;
+    UserTokenType?: { UserName: number; Anonymous: number };
   };
-  const client = opc.OPCUAClient.create({ endpointMustExist: false });
+
+  const clientOptions: Record<string, unknown> = {
+    endpointMustExist: false,
+    securityMode: resolveMessageSecurityMode(
+      security.securityMode,
+      opc.MessageSecurityMode,
+    ),
+    securityPolicy: resolveSecurityPolicy(
+      security.securityPolicy,
+      opc.SecurityPolicy,
+    ),
+  };
+  if (security.certificateFile?.trim()) {
+    clientOptions.certificateFile = security.certificateFile.trim();
+  }
+  if (security.privateKeyFile?.trim()) {
+    clientOptions.privateKeyFile = security.privateKeyFile.trim();
+  }
+  if (security.serverCertificateFile?.trim()) {
+    clientOptions.serverCertificate = readFileSync(
+      security.serverCertificateFile.trim(),
+    );
+  }
+  if (security.rejectUnauthorized === false) {
+    clientOptions.certificateManager = undefined;
+    clientOptions.serverCertificateValidation = async () => {
+      /* lab: allow untrusted server cert */
+    };
+  }
+
+  const client = opc.OPCUAClient.create(clientOptions);
   await client.connect(endpoint);
-  const session = await client.createSession();
+
+  let sessionIdentity:
+    { type: number; userName?: string; password?: string } | undefined;
+  const username = security.username?.trim();
+  if (username) {
+    const password = security.passwordFile?.trim()
+      ? readFileSync(security.passwordFile.trim(), 'utf8').trim()
+      : '';
+    sessionIdentity = {
+      type: opc.UserTokenType?.UserName ?? 1,
+      userName: username,
+      password,
+    };
+  }
+  const session = await client.createSession(sessionIdentity);
   return {
     read: async (nodeId) => {
       const data = await session.read({

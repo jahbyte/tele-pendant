@@ -93,6 +93,7 @@ const plcHealthMock = {
   host: '127.0.0.1',
   port: 1502,
   lastError: null,
+  security: null as string | null,
 };
 
 function confirmDeleteDialog() {
@@ -269,7 +270,13 @@ describe('AdminPage', () => {
             lastError: null,
           };
         }
-        return plcHealthMock;
+        if (healthCall === 5) {
+          return { ...plcHealthMock, security: null };
+        }
+        return {
+          ...plcHealthMock,
+          security: 'opcua SignAndEncrypt',
+        };
       }
       if (path === '/plc/connections') {
         return [
@@ -299,6 +306,10 @@ describe('AdminPage', () => {
     expect(await screen.findByText(/^Not connected$/i)).toBeInTheDocument();
     await vi.advanceTimersByTimeAsync(2100);
     expect(await screen.findByText(/^Connected$/i)).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(
+      await screen.findByText(/Connected · opcua SignAndEncrypt/i),
+    ).toBeInTheDocument();
     vi.useRealTimers();
   });
 
@@ -349,14 +360,17 @@ describe('AdminPage', () => {
       target: { value: '2' },
     });
     await saveSimConnection();
-    expect(patch).toHaveBeenCalledWith('/plc/connections/1', {
-      label: 'sim',
-      host: '10.1.1.1',
-      port: 502,
-      unitId: 2,
-      enabled: true,
-      protocol: 'modbus-tcp',
-    });
+    expect(patch).toHaveBeenCalledWith(
+      '/plc/connections/1',
+      expect.objectContaining({
+        label: 'sim',
+        host: '10.1.1.1',
+        port: 502,
+        unitId: 2,
+        enabled: true,
+        protocol: 'modbus-tcp',
+      }),
+    );
 
     fireEvent.click(screen.getByLabelText('1 use'));
     await saveSimConnection();
@@ -396,14 +410,17 @@ describe('AdminPage', () => {
     await screen.findByRole('alertdialog');
     confirmPlcEnableDialog();
     await waitFor(() =>
-      expect(post).toHaveBeenCalledWith('/plc/connections', {
-        label: 'plant',
-        host: '10.0.0.5',
-        port: 502,
-        unitId: 1,
-        enabled: true,
-        protocol: 'modbus-tcp',
-      }),
+      expect(post).toHaveBeenCalledWith(
+        '/plc/connections',
+        expect.objectContaining({
+          label: 'plant',
+          host: '10.0.0.5',
+          port: 502,
+          unitId: 1,
+          enabled: true,
+          protocol: 'modbus-tcp',
+        }),
+      ),
     );
   });
 
@@ -917,6 +934,14 @@ describe('AdminPage', () => {
             enabled: true,
             isSimulator: false,
             protocol: 'opcua',
+            tlsCaPath: '/certs/ca.pem',
+            tlsCertPath: '/certs/client.pem',
+            tlsKeyPath: '/certs/client.key',
+            tlsRejectUnauthorized: false,
+            opcSecurityMode: 'Sign',
+            opcSecurityPolicy: 'Basic256Sha256',
+            opcUsername: 'ops',
+            opcPasswordFile: '/run/secrets/opc',
           },
         ];
       }
@@ -978,10 +1003,104 @@ describe('AdminPage', () => {
     fireEvent.change(screen.getByLabelText('1 protocol'), {
       target: { value: 'modbus-tcp' },
     });
+    expect(
+      screen.getAllByText(/Unencrypted Modbus TCP/i).length,
+    ).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText('1 protocol'), {
+      target: { value: 'modbus-tls' },
+    });
+    fireEvent.click(screen.getByLabelText('1 verify server'));
+    fireEvent.change(screen.getByLabelText('1 tls ca'), {
+      target: { value: '/certs/ca2.pem' },
+    });
+    fireEvent.change(screen.getByLabelText('1 tls cert'), {
+      target: { value: '/certs/client2.pem' },
+    });
+    fireEvent.change(screen.getByLabelText('1 tls key'), {
+      target: { value: '/certs/client2.key' },
+    });
+    fireEvent.change(screen.getByLabelText('new protocol'), {
+      target: { value: 'modbus-tls' },
+    });
+    fireEvent.change(screen.getByLabelText('new tls ca'), {
+      target: { value: '/certs/new-ca.pem' },
+    });
+    fireEvent.change(screen.getByLabelText('new tls cert'), {
+      target: { value: '/certs/new-client.pem' },
+    });
+    fireEvent.change(screen.getByLabelText('new tls key'), {
+      target: { value: '/certs/new-client.key' },
+    });
+    fireEvent.click(screen.getByLabelText('new verify server'));
     fireEvent.change(screen.getByLabelText('1 protocol'), {
       target: { value: 'opcua' },
     });
+    fireEvent.change(screen.getByLabelText('1 tls cert'), {
+      target: { value: '/certs/client.pem' },
+    });
+    fireEvent.change(screen.getByLabelText('1 tls key'), {
+      target: { value: '/certs/client.key' },
+    });
+    fireEvent.change(screen.getByLabelText('1 tls ca'), {
+      target: { value: '/certs/ca.pem' },
+    });
+    fireEvent.change(screen.getByLabelText('1 opc security mode'), {
+      target: { value: 'None' },
+    });
+    expect(
+      screen.getAllByText(/Unencrypted OPC UA channel/i).length,
+    ).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText('1 opc security mode'), {
+      target: { value: 'Sign' },
+    });
+    fireEvent.change(screen.getByLabelText('1 opc security mode'), {
+      target: { value: 'SignAndEncrypt' },
+    });
+    fireEvent.change(screen.getByLabelText('1 opc policy'), {
+      target: { value: 'Aes256_Sha256_RsaPss' },
+    });
+    fireEvent.change(screen.getByLabelText('1 opc user'), {
+      target: { value: 'plant' },
+    });
+    fireEvent.change(screen.getByLabelText('1 opc password file'), {
+      target: { value: '/run/secrets/opc' },
+    });
     await saveSimConnection();
+    expect(patch).toHaveBeenCalledWith(
+      '/plc/connections/1',
+      expect.objectContaining({
+        protocol: 'opcua',
+        tlsCertPath: '/certs/client.pem',
+        tlsKeyPath: '/certs/client.key',
+        tlsCaPath: '/certs/ca.pem',
+        tlsRejectUnauthorized: true,
+        opcSecurityMode: 'SignAndEncrypt',
+        opcSecurityPolicy: 'Aes256_Sha256_RsaPss',
+        opcUsername: 'plant',
+        opcPasswordFile: '/run/secrets/opc',
+      }),
+    );
+    fireEvent.click(screen.getByLabelText('1 verify server'));
+    fireEvent.change(screen.getByLabelText('1 opc policy'), {
+      target: { value: '' },
+    });
+    fireEvent.change(screen.getByLabelText('1 opc user'), {
+      target: { value: '' },
+    });
+    fireEvent.change(screen.getByLabelText('1 opc password file'), {
+      target: { value: '' },
+    });
+    await saveSimConnection();
+    expect(patch).toHaveBeenCalledWith(
+      '/plc/connections/1',
+      expect.objectContaining({
+        protocol: 'opcua',
+        tlsRejectUnauthorized: false,
+        opcSecurityPolicy: null,
+        opcUsername: null,
+        opcPasswordFile: null,
+      }),
+    );
 
     await goConfigSection('Register maps');
     fireEvent.change(screen.getByLabelText('holding.height node'), {

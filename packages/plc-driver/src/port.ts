@@ -6,11 +6,28 @@ export interface PlcPoint {
   nodeId?: string | null;
 }
 
+export type OpcSecurityMode = 'None' | 'Sign' | 'SignAndEncrypt';
+
 export interface PlcConnectOptions {
   host: string;
   port: number;
   unitId?: number;
   timeoutMs?: number;
+  /** Client / application certificate PEM path (OPC UA or Modbus TLS). */
+  tlsCertPath?: string | null;
+  /** Client private key PEM path. */
+  tlsKeyPath?: string | null;
+  /** CA / trust PEM path. */
+  tlsCaPath?: string | null;
+  /** When false, skip peer certificate verification (lab only). */
+  tlsRejectUnauthorized?: boolean;
+  /** When true, Modbus connects over TLS (modbus-tls protocol). */
+  modbusTls?: boolean;
+  opcSecurityMode?: OpcSecurityMode | null;
+  opcSecurityPolicy?: string | null;
+  opcUsername?: string | null;
+  /** Absolute path to a file whose contents are the OPC UA password. */
+  opcPasswordFile?: string | null;
 }
 
 /** Protocol-neutral read/write. Modbus and OPC UA each adapt to this. */
@@ -28,6 +45,13 @@ export interface ModbusShapedDriver {
     port: number;
     unitId: number;
     timeoutMs?: number;
+    tls?: {
+      enabled: boolean;
+      caPath?: string | null;
+      certPath?: string | null;
+      keyPath?: string | null;
+      rejectUnauthorized?: boolean;
+    };
   }): Promise<void>;
   disconnect(): Promise<void>;
   isConnected(): boolean;

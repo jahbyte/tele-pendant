@@ -55,6 +55,14 @@ export class BaselineSchema1762370000000 implements MigrationInterface {
         "poll_ms" integer NOT NULL DEFAULT (250),
         "enabled" boolean NOT NULL DEFAULT (1),
         "is_simulator" boolean NOT NULL DEFAULT (0),
+        "tls_ca_path" varchar,
+        "tls_cert_path" varchar,
+        "tls_key_path" varchar,
+        "tls_reject_unauthorized" boolean NOT NULL DEFAULT (1),
+        "opc_security_mode" varchar DEFAULT ('SignAndEncrypt'),
+        "opc_security_policy" varchar DEFAULT ('Basic256Sha256'),
+        "opc_username" varchar,
+        "opc_password_file" varchar,
         "created_at" datetime NOT NULL DEFAULT (datetime('now')),
         "updated_at" datetime NOT NULL DEFAULT (datetime('now')),
         CONSTRAINT "UQ_plc_connections_label" UNIQUE ("label")
@@ -159,6 +167,7 @@ export class BaselineSchema1762370000000 implements MigrationInterface {
         "value" float NOT NULL,
         "state" varchar NOT NULL DEFAULT ('active'),
         "acked_at" datetime,
+        "cleared_at" datetime,
         "created_at" datetime NOT NULL DEFAULT (datetime('now')),
         CONSTRAINT "FK_alarm_events_definition" FOREIGN KEY ("definition_id") REFERENCES "alarm_definitions"("id") ON DELETE CASCADE
       )

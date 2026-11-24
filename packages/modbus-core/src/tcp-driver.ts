@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import * as Modbus from 'jsmodbus';
 import net from 'net';
+import tls from 'tls';
 import { ModbusConnectionOptions, ModbusDriver } from './driver.interface';
 
 /**
@@ -82,49 +84,22 @@ export class TcpModbusDriver implements ModbusDriver {
   async connect(options: ModbusConnectionOptions): Promise<void> {
     await this.disconnect();
     const generation = ++this.generation;
-
-    const socket = new net.Socket();
-    const client = new Modbus.client.TCP(socket, options.unitId);
     const timeoutMs = options.timeoutMs ?? 3000;
     this.requestTimeoutMs = timeoutMs;
 
+    const useTls = options.tls?.enabled === true;
+    let socket: net.Socket | tls.TLSSocket;
+
     try {
-      await new Promise<void>((resolve, reject) => {
-        const onError = (err: Error) => {
-          cleanup();
-          reject(err);
-        };
-        const onConnect = () => {
-          cleanup();
-          resolve();
-        };
-        const timer = setTimeout(() => {
-          cleanup();
-          socket.destroy();
-          reject(
-            new Error(
-              `Modbus connect timeout to ${options.host}:${options.port}`,
-            ),
-          );
-        }, timeoutMs);
-
-        const cleanup = () => {
-          clearTimeout(timer);
-          socket.off('error', onError);
-          socket.off('connect', onConnect);
-        };
-
-        socket.once('error', onError);
-        socket.once('connect', onConnect);
-        socket.connect({ host: options.host, port: options.port });
-      });
+      socket = useTls
+        ? await this.connectTls(options, timeoutMs)
+        : await this.connectPlain(options, timeoutMs);
     } catch (err) {
       if (this.generation === generation) {
         this.connected = false;
         this.socket = null;
         this.client = null;
       }
-      socket.destroy();
       throw err;
     }
 
@@ -133,6 +108,7 @@ export class TcpModbusDriver implements ModbusDriver {
       throw new Error('Modbus connect superseded');
     }
 
+    const client = new Modbus.client.TCP(socket, options.unitId);
     socket.on('close', () => {
       if (this.generation !== generation || this.socket !== socket) return;
       this.connected = false;
@@ -145,6 +121,90 @@ export class TcpModbusDriver implements ModbusDriver {
     this.socket = socket;
     this.client = client;
     this.connected = true;
+  }
+
+  private connectPlain(
+    options: ModbusConnectionOptions,
+    timeoutMs: number,
+  ): Promise<net.Socket> {
+    const socket = new net.Socket();
+    return new Promise<net.Socket>((resolve, reject) => {
+      const onError = (err: Error) => {
+        cleanup();
+        socket.destroy();
+        reject(err);
+      };
+      const onConnect = () => {
+        cleanup();
+        resolve(socket);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        socket.destroy();
+        reject(
+          new Error(
+            `Modbus connect timeout to ${options.host}:${options.port}`,
+          ),
+        );
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off('error', onError);
+        socket.off('connect', onConnect);
+      };
+
+      socket.once('error', onError);
+      socket.once('connect', onConnect);
+      socket.connect({ host: options.host, port: options.port });
+    });
+  }
+
+  private connectTls(
+    options: ModbusConnectionOptions,
+    timeoutMs: number,
+  ): Promise<tls.TLSSocket> {
+    const tlsOpts = options.tls!;
+    const readOptional = (path?: string | null) =>
+      path?.trim() ? readFileSync(path.trim()) : undefined;
+    return new Promise<tls.TLSSocket>((resolve, reject) => {
+      const socket = tls.connect({
+        host: options.host,
+        port: options.port,
+        ca: readOptional(tlsOpts.caPath),
+        cert: readOptional(tlsOpts.certPath),
+        key: readOptional(tlsOpts.keyPath),
+        rejectUnauthorized: tlsOpts.rejectUnauthorized !== false,
+        servername: options.host,
+      });
+      const onError = (err: Error) => {
+        cleanup();
+        socket.destroy();
+        reject(err);
+      };
+      const onSecure = () => {
+        cleanup();
+        resolve(socket);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        socket.destroy();
+        reject(
+          new Error(
+            `Modbus TLS connect timeout to ${options.host}:${options.port}`,
+          ),
+        );
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off('error', onError);
+        socket.off('secureConnect', onSecure);
+      };
+
+      socket.once('error', onError);
+      socket.once('secureConnect', onSecure);
+    });
   }
 
   async disconnect(): Promise<void> {

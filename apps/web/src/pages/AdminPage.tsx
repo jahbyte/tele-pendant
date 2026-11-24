@@ -37,7 +37,7 @@ import {
 } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { ConfigScanCodesSection } from '@/components/config-scan-codes-section';
@@ -57,6 +57,9 @@ import { useConfirmDialog } from '@/lib/confirm-dialog';
 import { useDeleteConfirmDialog } from '@/lib/delete-confirm';
 import { getStoredUserRole } from '@/lib/user-session';
 
+type PlcProtocol = 'modbus-tcp' | 'modbus-tls' | 'opcua';
+type OpcSecurityMode = 'None' | 'Sign' | 'SignAndEncrypt';
+
 interface PlcConnectionRow {
   id: string;
   label: string;
@@ -65,7 +68,15 @@ interface PlcConnectionRow {
   unitId?: number;
   enabled: boolean;
   isSimulator: boolean;
-  protocol?: 'modbus-tcp' | 'opcua';
+  protocol?: PlcProtocol;
+  tlsCaPath?: string | null;
+  tlsCertPath?: string | null;
+  tlsKeyPath?: string | null;
+  tlsRejectUnauthorized?: boolean;
+  opcSecurityMode?: OpcSecurityMode | null;
+  opcSecurityPolicy?: string | null;
+  opcUsername?: string | null;
+  opcPasswordFile?: string | null;
 }
 
 interface PlcHealth {
@@ -75,6 +86,7 @@ interface PlcHealth {
   host: string | null;
   port: number | null;
   lastError: string | null;
+  security?: string | null;
 }
 
 interface ConnectionInput {
@@ -83,7 +95,21 @@ interface ConnectionInput {
   port: number;
   unitId: number;
   enabled: boolean;
-  protocol: 'modbus-tcp' | 'opcua';
+  protocol: PlcProtocol;
+  tlsCaPath?: string | null;
+  tlsCertPath?: string | null;
+  tlsKeyPath?: string | null;
+  tlsRejectUnauthorized?: boolean;
+  opcSecurityMode?: OpcSecurityMode | null;
+  opcSecurityPolicy?: string | null;
+  opcUsername?: string | null;
+  opcPasswordFile?: string | null;
+}
+
+function parsePlcProtocol(value: string): PlcProtocol {
+  if (value === 'opcua') return 'opcua';
+  if (value === 'modbus-tls') return 'modbus-tls';
+  return 'modbus-tcp';
 }
 
 interface AlarmDefinitionRow {
@@ -183,7 +209,7 @@ function PlcConnectionStatus({
   if (health.connected) {
     return wrap(
       <Badge className="w-fit border-transparent bg-emerald-600 text-white hover:bg-emerald-600">
-        Connected
+        Connected{health.security ? ` · ${health.security}` : ''}
       </Badge>,
     );
   }
@@ -408,6 +434,14 @@ export function AdminPage() {
                     unitId: row.unitId ?? 1,
                     enabled: row.enabled,
                     protocol: row.protocol ?? 'modbus-tcp',
+                    tlsCaPath: row.tlsCaPath,
+                    tlsCertPath: row.tlsCertPath,
+                    tlsKeyPath: row.tlsKeyPath,
+                    tlsRejectUnauthorized: row.tlsRejectUnauthorized,
+                    opcSecurityMode: row.opcSecurityMode,
+                    opcSecurityPolicy: row.opcSecurityPolicy,
+                    opcUsername: row.opcUsername,
+                    opcPasswordFile: row.opcPasswordFile,
                     isSimulator: row.isSimulator,
                   }}
                   submitLabel={`Save ${row.label}`}
@@ -1139,13 +1173,32 @@ function ConnectionEditor({
   const [host, setHost] = useState(initial.host);
   const [port, setPort] = useState(String(initial.port));
   const [unitId, setUnitId] = useState(String(initial.unitId));
-  const [protocol, setProtocol] = useState<'modbus-tcp' | 'opcua'>(
-    initial.protocol,
+  const [protocol, setProtocol] = useState<PlcProtocol>(initial.protocol);
+  const [tlsCaPath, setTlsCaPath] = useState(initial.tlsCaPath ?? '');
+  const [tlsCertPath, setTlsCertPath] = useState(initial.tlsCertPath ?? '');
+  const [tlsKeyPath, setTlsKeyPath] = useState(initial.tlsKeyPath ?? '');
+  const [tlsRejectUnauthorized, setTlsRejectUnauthorized] = useState(
+    initial.tlsRejectUnauthorized !== false,
+  );
+  const [opcSecurityMode, setOpcSecurityMode] = useState<OpcSecurityMode>(
+    initial.opcSecurityMode ?? 'SignAndEncrypt',
+  );
+  const [opcSecurityPolicy, setOpcSecurityPolicy] = useState(
+    initial.opcSecurityPolicy ?? 'Basic256Sha256',
+  );
+  const [opcUsername, setOpcUsername] = useState(initial.opcUsername ?? '');
+  const [opcPasswordFile, setOpcPasswordFile] = useState(
+    initial.opcPasswordFile ?? '',
   );
   const [enabled, setEnabled] = useState(initial.enabled);
   const usePlcId = useId();
+  const verifyTlsId = useId();
   const { askConfirm, confirmDialog } = useConfirmDialog();
   const [busy, setBusy] = useState(false);
+  const showTlsFields = protocol === 'modbus-tls' || protocol === 'opcua';
+  const showOpcFields = protocol === 'opcua';
+  const showCleartextWarning =
+    protocol === 'modbus-tcp' && !initial.isSimulator;
 
   useEffect(() => {
     setEnabled(initial.enabled);
@@ -1161,6 +1214,14 @@ function ConnectionEditor({
         unitId: Number(unitId),
         enabled,
         protocol,
+        tlsCaPath: tlsCaPath || null,
+        tlsCertPath: tlsCertPath || null,
+        tlsKeyPath: tlsKeyPath || null,
+        tlsRejectUnauthorized,
+        opcSecurityMode: showOpcFields ? opcSecurityMode : null,
+        opcSecurityPolicy: showOpcFields ? opcSecurityPolicy || null : null,
+        opcUsername: showOpcFields ? opcUsername || null : null,
+        opcPasswordFile: showOpcFields ? opcPasswordFile || null : null,
       });
       const success = { ok: true as const, text: 'Saved.' };
       onNote(success);
@@ -1240,15 +1301,127 @@ function ConnectionEditor({
           label="Protocol"
           ariaLabel={`${noteKey} protocol`}
           value={protocol}
-          onChange={(value) =>
-            setProtocol(value === 'opcua' ? 'opcua' : 'modbus-tcp')
-          }
+          onChange={(value) => setProtocol(parsePlcProtocol(value))}
           options={[
             { value: 'modbus-tcp', label: 'Modbus TCP' },
+            { value: 'modbus-tls', label: 'Modbus TLS' },
             { value: 'opcua', label: 'OPC UA' },
           ]}
         />
       </div>
+      {showCleartextWarning ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unencrypted Modbus TCP</AlertTitle>
+          <AlertDescription>
+            Use only on an isolated OT network or VPN; prefer OPC UA or Modbus
+            TLS for plant links.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {showTlsFields ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-2">
+            <Label htmlFor={`${noteKey}-tls-ca`}>CA / trust PEM path</Label>
+            <Input
+              id={`${noteKey}-tls-ca`}
+              aria-label={`${noteKey} tls ca`}
+              value={tlsCaPath}
+              onChange={(event) => setTlsCaPath(event.target.value)}
+              placeholder="/certs/ca.pem"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={`${noteKey}-tls-cert`}>Client cert PEM path</Label>
+            <Input
+              id={`${noteKey}-tls-cert`}
+              aria-label={`${noteKey} tls cert`}
+              value={tlsCertPath}
+              onChange={(event) => setTlsCertPath(event.target.value)}
+              placeholder="/certs/client.pem"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={`${noteKey}-tls-key`}>Client key PEM path</Label>
+            <Input
+              id={`${noteKey}-tls-key`}
+              aria-label={`${noteKey} tls key`}
+              value={tlsKeyPath}
+              onChange={(event) => setTlsKeyPath(event.target.value)}
+              placeholder="/certs/client.key"
+            />
+          </div>
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <Checkbox
+              id={verifyTlsId}
+              aria-label={`${noteKey} verify server`}
+              checked={tlsRejectUnauthorized}
+              onCheckedChange={(checked) =>
+                setTlsRejectUnauthorized(checked === true)
+              }
+            />
+            <Label htmlFor={verifyTlsId}>Verify server certificate</Label>
+          </div>
+        </div>
+      ) : null}
+      {showOpcFields ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <AdminSelect
+            label="OPC security mode"
+            ariaLabel={`${noteKey} opc security mode`}
+            value={opcSecurityMode}
+            onChange={(value) =>
+              setOpcSecurityMode(
+                value === 'None' || value === 'Sign' ? value : 'SignAndEncrypt',
+              )
+            }
+            options={[
+              { value: 'None', label: 'None (lab only)' },
+              { value: 'Sign', label: 'Sign' },
+              { value: 'SignAndEncrypt', label: 'Sign and Encrypt' },
+            ]}
+          />
+          {opcSecurityMode === 'None' ? (
+            <Alert variant="destructive" className="sm:col-span-2">
+              <AlertTitle>Unencrypted OPC UA channel</AlertTitle>
+              <AlertDescription>
+                None/None is for lab use only. Prefer SignAndEncrypt with
+                certificates for plant links.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="grid gap-2">
+            <Label htmlFor={`${noteKey}-opc-policy`}>Security policy</Label>
+            <Input
+              id={`${noteKey}-opc-policy`}
+              aria-label={`${noteKey} opc policy`}
+              value={opcSecurityPolicy}
+              onChange={(event) => setOpcSecurityPolicy(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={`${noteKey}-opc-user`}>OPC username</Label>
+            <Input
+              id={`${noteKey}-opc-user`}
+              aria-label={`${noteKey} opc user`}
+              value={opcUsername}
+              onChange={(event) => setOpcUsername(event.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={`${noteKey}-opc-pass-file`}>
+              OPC password file path
+            </Label>
+            <Input
+              id={`${noteKey}-opc-pass-file`}
+              aria-label={`${noteKey} opc password file`}
+              value={opcPasswordFile}
+              onChange={(event) => setOpcPasswordFile(event.target.value)}
+              placeholder="/run/secrets/opc-password"
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <Checkbox
           id={usePlcId}

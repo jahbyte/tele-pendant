@@ -1,4 +1,5 @@
 import { OpcUaPort, errorForOpcStatus } from './opcua-port';
+import type { OpcUaSecurityOptions } from './opcua-port';
 
 describe('OpcUaPort', () => {
   const session = {
@@ -9,12 +10,18 @@ describe('OpcUaPort', () => {
     close: jest.fn(async () => undefined),
   };
 
+  const labConnect = {
+    host: '127.0.0.1',
+    port: 4840,
+    opcSecurityMode: 'None' as const,
+  };
+
   it('reads and writes by node id and disconnects', async () => {
     const port = new OpcUaPort(async () => session);
     await expect(port.read({ kind: 'coil', address: 0 })).rejects.toThrow(
       /not connected/,
     );
-    await port.connect({ host: '127.0.0.1', port: 4840 });
+    await port.connect(labConnect);
     port.setPoints([
       { kind: 'coil', address: 0, nodeId: 'ns=1;s=HoistUp' },
       { kind: 'discrete', address: 0, nodeId: 'ns=1;s=HoistUp' },
@@ -51,7 +58,7 @@ describe('OpcUaPort', () => {
       close: jest.fn(async () => undefined),
     };
     const port = new OpcUaPort(async () => quiet);
-    await port.connect({ host: '127.0.0.1', port: 4840 });
+    await port.connect(labConnect);
     await expect(port.read({ kind: 'holding', address: 9 })).rejects.toThrow(
       /No OPC UA node/,
     );
@@ -74,11 +81,42 @@ describe('OpcUaPort', () => {
       close: jest.fn(async () => undefined),
     };
     const port = new OpcUaPort(async () => broken);
-    await port.connect({ host: '127.0.0.1', port: 4840 });
+    await port.connect(labConnect);
     port.setPoints([{ kind: 'coil', address: 0, nodeId: 'ns=1;s=X' }]);
     await expect(port.read({ kind: 'coil', address: 0 })).rejects.toThrow(
       /BadSessionIdInvalid/,
     );
     expect(port.isConnected()).toBe(false);
+  });
+
+  it('requires cert and key for SignAndEncrypt and passes security options', async () => {
+    const seen: OpcUaSecurityOptions[] = [];
+    const port = new OpcUaPort(async (_endpoint, security) => {
+      seen.push(security);
+      return session;
+    });
+    await expect(
+      port.connect({ host: '10.0.0.1', port: 4840 }),
+    ).rejects.toThrow(/tlsCertPath and tlsKeyPath/);
+    await port.connect({
+      host: '10.0.0.1',
+      port: 4840,
+      opcSecurityMode: 'SignAndEncrypt',
+      opcSecurityPolicy: 'Basic256Sha256',
+      tlsCertPath: '/certs/client.pem',
+      tlsKeyPath: '/certs/client.key',
+      tlsCaPath: '/certs/ca.pem',
+      opcUsername: 'plant',
+      opcPasswordFile: '/run/secrets/opc',
+    });
+    expect(seen[0]).toMatchObject({
+      securityMode: 'SignAndEncrypt',
+      securityPolicy: 'Basic256Sha256',
+      certificateFile: '/certs/client.pem',
+      privateKeyFile: '/certs/client.key',
+      serverCertificateFile: '/certs/ca.pem',
+      username: 'plant',
+      passwordFile: '/run/secrets/opc',
+    });
   });
 });
