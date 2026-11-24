@@ -49,6 +49,8 @@ pnpm --filter @tele-pendant/api start:dev
 pnpm --filter @tele-pendant/web dev
 ```
 
+Run the API from the repo root (or `apps/api`) and keep `DATABASE_PATH` / `SQLITE_DIR` pointing at the same `data` folder for the whole session. Relative `./data` values are turned into absolute paths so plant graphic uploads and `/hmi-assets/...` use one folder. Docker Compose already does this inside the container; prefer Compose when you can.
+
 Open `http://localhost:5173`. Health is `http://localhost:3010/api/v1/health`. Sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
 
 ## 2. Expo

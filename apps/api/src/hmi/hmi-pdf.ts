@@ -43,11 +43,20 @@ export async function rasterizeFirstPdfPage(
   }
 }
 
+/**
+ * pdfjs validates this as a URL and requires a trailing forward slash.
+ * Windows `path.sep` (`\`) is rejected ("must include trailing slash").
+ */
+export function pdfStandardFontDataUrl(fontsDir: string): string {
+  const normalized = fontsDir.replace(/\\/g, '/').replace(/\/+$/, '');
+  return `${normalized}/`;
+}
+
 function standardFontDataUrl(): string {
   const require = createRequire(__filename);
   const pkg = require.resolve('pdfjs-dist/package.json');
   const fonts = path.join(path.dirname(pkg), 'standard_fonts');
-  return `${fonts}${path.sep}`;
+  return pdfStandardFontDataUrl(fonts);
 }
 
 export async function loadPdfTools(): Promise<PdfTools> {

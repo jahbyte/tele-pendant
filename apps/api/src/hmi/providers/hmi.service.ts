@@ -28,6 +28,7 @@ import {
   HMI_PDF_BYTE_LIMIT,
   hmiAssetPublicPath,
   hmiAssetsDirectory,
+  pdfFailureMessage,
   sanitizeSvg,
   svgFailureMessage,
 } from '../hmi-assets';
@@ -238,9 +239,7 @@ export class HmiService {
       try {
         png = await renderPdfFirstPage(file.buffer);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Could not read that PDF';
-        throw new BadRequestException(message);
+        throw new BadRequestException(pdfFailureMessage(err));
       }
       const id = filename.replace(/\.pdf$/, '');
       writeFileSync(join(dir, `${id}.pdf`), file.buffer);

@@ -1,4 +1,8 @@
-import { renderPdfFirstPage, rasterizeFirstPdfPage } from './hmi-pdf';
+import {
+  pdfStandardFontDataUrl,
+  rasterizeFirstPdfPage,
+  renderPdfFirstPage,
+} from './hmi-pdf';
 
 describe('hmi pdf page', () => {
   it('rasterizes page 1 to a png', async () => {
@@ -50,5 +54,14 @@ describe('hmi pdf page', () => {
       }),
     }));
     expect(png.toString()).toBe('png');
+  });
+
+  it('normalizes Windows font dirs to a trailing forward slash for pdfjs', () => {
+    expect(
+      pdfStandardFontDataUrl('C:\\Users\\x\\pdfjs-dist\\standard_fonts'),
+    ).toBe('C:/Users/x/pdfjs-dist/standard_fonts/');
+    expect(pdfStandardFontDataUrl('/tmp/standard_fonts/')).toBe(
+      '/tmp/standard_fonts/',
+    );
   });
 });

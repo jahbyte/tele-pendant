@@ -1,16 +1,32 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import type { NextFunction, Request, Response } from 'express';
 
 const HMI_ASSETS_PREFIX = '/hmi-assets';
 
+/**
+ * SQLite / plant-graphic root as an absolute path.
+ * Relative DATABASE_PATH / SQLITE_DIR values are resolved from process.cwd()
+ * so Express sendFile and uploads share the same folder on Windows bare installs.
+ */
+export function resolveDataRoot(): string {
+  const sqliteDir = process.env.SQLITE_DIR?.trim();
+  if (sqliteDir) {
+    return isAbsolute(sqliteDir)
+      ? sqliteDir
+      : resolve(process.cwd(), sqliteDir);
+  }
+  const dbPath = process.env.DATABASE_PATH?.trim();
+  if (dbPath) {
+    const dir = dbPath.replace(/[/\\][^/\\]+$/, '') || '.';
+    return isAbsolute(dir) ? dir : resolve(process.cwd(), dir);
+  }
+  return resolve(process.cwd(), 'data');
+}
+
 /** Persist plant graphics next to SQLite so docker named volumes keep them. */
 export function hmiAssetsDirectory(): string {
-  const dataRoot =
-    process.env.SQLITE_DIR?.trim() ||
-    process.env.DATABASE_PATH?.replace(/[/\\][^/\\]+$/, '') ||
-    join(process.cwd(), 'data');
-  const dir = join(dataRoot, 'hmi-assets');
+  const dir = resolve(join(resolveDataRoot(), 'hmi-assets'));
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -36,7 +52,7 @@ export function serveHmiAssets(
     next();
     return;
   }
-  const file = join(hmiAssetsDirectory(), match[1]);
+  const file = resolve(hmiAssetsDirectory(), match[1]);
   if (!existsSync(file)) {
     res.status(404).type('application/json').json({
       message: 'HMI asset not found',
@@ -62,6 +78,22 @@ export const HMI_PDF_BYTE_LIMIT = 8_000_000;
 
 export function svgFailureMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Invalid SVG';
+}
+
+/**
+ * Operator-facing PDF upload error. Never echo host paths (pdfjs Windows
+ * standard_fonts factory messages include the full node_modules path).
+ */
+export function pdfFailureMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : '';
+  if (
+    /standard_fonts|Invalid factory url|pdfjs|ENOENT|EACCES/i.test(raw) ||
+    /[A-Za-z]:[\\/]|\/Users\/|\/home\/|node_modules/i.test(raw)
+  ) {
+    return 'Could not read that PDF. Try a one-page PDF or upload a PNG instead.';
+  }
+  if (raw.trim()) return raw;
+  return 'Could not read that PDF';
 }
 
 /** Drop scripts, embedded documents, and event handlers from an uploaded SVG. */
