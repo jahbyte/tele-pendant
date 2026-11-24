@@ -8,7 +8,7 @@ export class SaveBackgroundDto {
   @IsString()
   id?: string;
 
-  @ApiProperty({ example: 'demo-crane' })
+  @ApiProperty({ example: 'demo-p03a21' })
   @IsString()
   @MinLength(1)
   @MaxLength(80)

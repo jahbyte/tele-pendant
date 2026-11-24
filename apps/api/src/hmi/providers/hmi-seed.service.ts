@@ -96,6 +96,9 @@ export class HmiSeedService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    // Drop the old crane screen before the empty-DB seed check so a crane-only
+    // database reseeds as demo-p03a21 and never shows demo-crane in Operator.
+    await this.removeLegacyDemoCrane();
     const count = await this.cells.count();
     if (count === 0) {
       this.logger.log('Seeding P03A21 welding pendant HMI layout');
@@ -108,6 +111,29 @@ export class HmiSeedService implements OnModuleInit {
     await this.ensureSampleTrends();
     await this.attachOrphanCells();
     await this.ensureDemoPlantExample();
+  }
+
+  /**
+   * Legacy crane demo screen — delete it and its buttons/labels so it never
+   * appears in the Operator screen list after boot.
+   */
+  private async removeLegacyDemoCrane(): Promise<void> {
+    const rows = await this.backgrounds.find({ where: { name: 'demo-crane' } });
+    if (rows.length === 0) return;
+    for (const bg of rows) {
+      await this.overlays
+        .createQueryBuilder()
+        .delete()
+        .where('background_id = :id', { id: bg.id })
+        .execute();
+      await this.cells
+        .createQueryBuilder()
+        .delete()
+        .where('background_id = :id', { id: bg.id })
+        .execute();
+      await this.backgrounds.remove(bg);
+    }
+    this.logger.log(`Removed legacy demo-crane screen(s) (${rows.length})`);
   }
 
   /** Paths that may hold docs/samples/hmi/demo-crane.svg in Docker or local cwd. */

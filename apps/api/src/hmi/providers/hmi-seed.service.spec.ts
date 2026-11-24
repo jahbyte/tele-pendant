@@ -4,7 +4,7 @@ describe('HmiSeedService', () => {
   function makeService(overrides?: {
     cellCount?: number;
     selectorCount?: number;
-    activeBg?: { name: string; active: boolean } | null;
+    activeBg?: { id?: string; name: string; active: boolean } | null;
   }) {
     const cellCount = overrides?.cellCount ?? 0;
     const selectorCount = overrides?.selectorCount ?? 0;
@@ -23,10 +23,12 @@ describe('HmiSeedService', () => {
       create: jest.fn((row: unknown) => row),
     };
     const backgrounds = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(activeBg),
       update: jest.fn().mockResolvedValue(undefined),
       save: jest.fn(async (row: unknown) => row),
       create: jest.fn((row: unknown) => row),
+      remove: jest.fn(async (row: unknown) => row),
     };
     const registers = {
       findOne: jest.fn().mockResolvedValue(null),
@@ -42,6 +44,7 @@ describe('HmiSeedService', () => {
     const overlays = {
       createQueryBuilder: jest.fn(() => ({
         delete: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
         execute: jest.fn().mockResolvedValue(undefined),
       })),
       count: jest.fn().mockResolvedValue(0),
@@ -73,21 +76,43 @@ describe('HmiSeedService', () => {
     expect(cells.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('skips migration when selector cells already exist', async () => {
-    const { service } = makeService({
-      cellCount: 12,
-      selectorCount: 3,
-      activeBg: { name: 'demo-crane', active: true },
+  it('removes demo-crane and reseeds when the database is empty after cleanup', async () => {
+    const crane = { id: 'crane', name: 'demo-crane', active: true };
+    const { service, backgrounds, cells, overlays } = makeService({
+      cellCount: 0,
     });
+    backgrounds.find.mockResolvedValue([crane]);
+    const seed = jest.spyOn(service, 'seed').mockResolvedValue(undefined);
+
+    await service.onModuleInit();
+
+    expect(overlays.createQueryBuilder).toHaveBeenCalled();
+    expect(cells.createQueryBuilder).toHaveBeenCalled();
+    expect(backgrounds.remove).toHaveBeenCalledWith(crane);
+    expect(seed).toHaveBeenCalled();
+  });
+
+  it('removes demo-crane but keeps an existing P03A21 layout', async () => {
+    const crane = { id: 'crane', name: 'demo-crane', active: false };
+    const { service, backgrounds } = makeService({
+      cellCount: 18,
+      activeBg: { name: 'demo-p03a21', active: true },
+    });
+    backgrounds.find.mockResolvedValue([crane]);
+    const seed = jest.spyOn(service, 'seed').mockResolvedValue(undefined);
     const reset = jest
       .spyOn(service, 'resetP03a21Demo')
-      .mockResolvedValue({ ok: true, cells: 12 });
+      .mockResolvedValue({ ok: true, cells: 18 });
+
     await service.onModuleInit();
+
+    expect(backgrounds.remove).toHaveBeenCalledWith(crane);
+    expect(seed).not.toHaveBeenCalled();
     expect(reset).not.toHaveBeenCalled();
   });
 
-  it('skips migration when the active background is already P03A21', async () => {
-    const { service } = makeService({
+  it('skips reset when the active background is already P03A21', async () => {
+    const { service, backgrounds } = makeService({
       cellCount: 12,
       selectorCount: 0,
       activeBg: { name: 'demo-p03a21', active: true },
@@ -96,6 +121,7 @@ describe('HmiSeedService', () => {
       .spyOn(service, 'resetP03a21Demo')
       .mockResolvedValue({ ok: true, cells: 12 });
     await service.onModuleInit();
+    expect(backgrounds.remove).not.toHaveBeenCalled();
     expect(reset).not.toHaveBeenCalled();
   });
 
@@ -121,19 +147,6 @@ describe('HmiSeedService', () => {
     expect(custom.label).toBe('My custom jog');
     expect(cells.save).toHaveBeenCalledTimes(1);
     expect(cells.save).toHaveBeenCalledWith(shortened);
-  });
-
-  it('leaves an existing layout on its screen', async () => {
-    const { service } = makeService({
-      cellCount: 12,
-      selectorCount: 0,
-      activeBg: { name: 'demo-crane', active: true },
-    });
-    const reset = jest
-      .spyOn(service, 'resetP03a21Demo')
-      .mockResolvedValue({ ok: true, cells: 20 });
-    await service.onModuleInit();
-    expect(reset).not.toHaveBeenCalled();
   });
 
   it('adds a plant picture and three live labels when the demo has none', async () => {
