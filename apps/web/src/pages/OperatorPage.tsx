@@ -44,6 +44,7 @@ import {
   settleTouchPress,
   type TouchArm,
 } from '@/lib/touch-press';
+import { deferEnableRelease } from '@/lib/enable-voice-bridge';
 
 const CELL_STATE_ICON: Record<MatrixCellUiState, typeof Circle> = {
   idle: Circle,
@@ -149,6 +150,8 @@ export function OperatorPage() {
   const [tags, setTags] = useState<LiveTags | null>(null);
   const [safety, setSafety] = useState<HmiLayout['safety'] | null>(null);
   const holdsRef = useRef(new Map<string, HeldButton>());
+  /** Pointer ids currently holding Enable (no capture — mic needs the pointer). */
+  const enablePointersRef = useRef(new Set<number>());
   const [heldVersion, setHeldVersion] = useState(0);
   const bumpHolds = () => setHeldVersion((n) => n + 1);
   const [jogSpeed, setJogSpeed] = useState<'slow' | 'fast'>('fast');
@@ -532,6 +535,14 @@ export function OperatorPage() {
     direction?: 'a' | 'b',
   ) {
     releasePointerIfCaptured(target, pointerId);
+    // Header mic can take the mouse up while Enable stays asserted for Listen.
+    if (cell.style === 'enable') {
+      enablePointersRef.current.delete(pointerId);
+      deferEnableRelease(() => {
+        void releaseCell(cell, direction);
+      });
+      return;
+    }
     void releaseCell(cell, direction);
   }
 
@@ -561,11 +572,30 @@ export function OperatorPage() {
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') dropHeld();
     };
+    // Enable skips pointer capture so the header mic can receive the click.
+    // Release that Enable pointer on window up (or keep it through Listen).
+    const onPointerUp = (event: PointerEvent) => {
+      if (!enablePointersRef.current.has(event.pointerId)) return;
+      enablePointersRef.current.delete(event.pointerId);
+      for (const hold of [...holdsRef.current.values()]) {
+        const cell = layoutQuery.data?.cells.find(
+          (row) => row.id === hold.cellId,
+        );
+        if (cell?.style !== 'enable') continue;
+        deferEnableRelease(() => {
+          void releaseCell(cell, hold.direction ?? undefined);
+        });
+      }
+    };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', dropHeld);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', dropHeld);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
     };
   }, [layoutQuery.data?.cells, releaseDeadman]);
 
@@ -771,8 +801,12 @@ export function OperatorPage() {
           direction,
         );
       };
+      const isEnable = cell.style === 'enable';
       return {
         onPointerDown: (event) => {
+          if (isEnable) {
+            enablePointersRef.current.add(event.pointerId);
+          }
           if (isTouchPointer(event.pointerType)) {
             armTouchPress(
               touchArms.current,
@@ -780,7 +814,11 @@ export function OperatorPage() {
               event.clientX,
               event.clientY,
               commit,
-              () => trySetPointerCapture(event.currentTarget, event.pointerId),
+              // Enable must not capture the only mouse/finger — header mic needs it.
+              isEnable
+                ? () => undefined
+                : () =>
+                    trySetPointerCapture(event.currentTarget, event.pointerId),
               isOperatorStopCell(cell),
             );
             return;
@@ -790,7 +828,9 @@ export function OperatorPage() {
             commit();
             return;
           }
-          trySetPointerCapture(event.currentTarget, event.pointerId);
+          if (!isEnable) {
+            trySetPointerCapture(event.currentTarget, event.pointerId);
+          }
           commit();
         },
         onPointerMove: (event) => {
@@ -807,6 +847,7 @@ export function OperatorPage() {
             }
             return;
           }
+          if (isEnable) return;
           if (!holdToRun || !cellIsHeld(holdsRef.current, cell.id, direction)) {
             return;
           }
@@ -843,6 +884,8 @@ export function OperatorPage() {
         },
         onPointerLeave: (event) => {
           if (isTouchPointer(event.pointerType)) return;
+          // Keep Enable while the pointer moves to the header mic.
+          if (isEnable) return;
           finish(event);
         },
         onPointerCancel: (event) => {

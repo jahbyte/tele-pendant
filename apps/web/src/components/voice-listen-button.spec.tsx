@@ -3,6 +3,10 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { VoiceListenButton } from './voice-listen-button';
 import { renderWithProviders } from '../test/render';
 import * as api from '../lib/api';
+import {
+  endVoiceKeepEnable,
+  voiceKeepsEnable,
+} from '@/lib/enable-voice-bridge';
 
 const socket = vi.hoisted(() => ({
   emit: vi.fn(),
@@ -37,8 +41,15 @@ type Rec = {
   onend: (() => void) | null;
 };
 
+function pressMic(name = 'Listen') {
+  fireEvent.pointerDown(screen.getByRole('button', { name }), {
+    button: 0,
+  });
+}
+
 describe('VoiceListenButton', () => {
   beforeEach(() => {
+    endVoiceKeepEnable();
     socket.emit.mockClear();
     toastMocks.ok.mockClear();
     toastMocks.err.mockClear();
@@ -49,15 +60,30 @@ describe('VoiceListenButton', () => {
 
   it('reports missing speech recognition', async () => {
     renderWithProviders(<VoiceListenButton />);
-    const mic = screen.getByRole('button', { name: 'Listen' });
-    const down = fireEvent.pointerDown(mic);
-    expect(down).toBe(false);
-    fireEvent.click(mic);
+    pressMic();
+    expect(voiceKeepsEnable()).toBe(false);
     await waitFor(() =>
       expect(toastMocks.err).toHaveBeenCalledWith(
         'SpeechRecognition not supported in this browser',
       ),
     );
+  });
+
+  it('keeps Enable through Listen start', async () => {
+    const instances: Rec[] = [];
+    window.SpeechRecognition = vi.fn(function SpeechRecognition(this: Rec) {
+      this.start = vi.fn();
+      this.stop = vi.fn();
+      instances.push(this);
+    }) as unknown as typeof window.SpeechRecognition;
+    renderWithProviders(<VoiceListenButton />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Listen' }), {
+      button: 1,
+    });
+    expect(instances).toHaveLength(0);
+    pressMic();
+    expect(voiceKeepsEnable()).toBe(true);
+    expect(instances[0]?.start).toHaveBeenCalled();
   });
 
   it('ignores deadman release failures when listen ends', async () => {
@@ -72,7 +98,7 @@ describe('VoiceListenButton', () => {
       return { ok: true };
     });
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     await waitFor(() => expect(instances[0]?.onend).toBeTruthy());
     instances[0]!.onend?.();
   });
@@ -88,8 +114,8 @@ describe('VoiceListenButton', () => {
       this.onend = null;
     }) as unknown as typeof window.SpeechRecognition;
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
-    fireEvent.click(screen.getByRole('button', { name: /Listening/ }));
+    pressMic();
+    pressMic('Listening…');
     expect(socket.emit).toHaveBeenCalledWith('deadman.pulse');
   });
 
@@ -121,12 +147,11 @@ describe('VoiceListenButton', () => {
       post.mock.calls.filter(([path]) => path === '/media/voice');
 
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     expect(socket.emit).toHaveBeenCalledWith('deadman.pulse');
 
     const instance = () => instances[instances.length - 1]!;
 
-    // interim only — no send yet
     instance().onresult?.({
       results: [
         Object.assign([{ transcript: 'ow' }], { isFinal: false }),
@@ -134,8 +159,7 @@ describe('VoiceListenButton', () => {
     });
     expect(voiceCalls()).toHaveLength(0);
 
-    // final owva up
-    fireEvent.click(screen.getByRole('button', { name: /Listening|Listen/ }));
+    pressMic('Listening…');
     await waitFor(() => expect(instances.length).toBeGreaterThan(0));
     instance().onresult?.({
       results: [
@@ -149,7 +173,7 @@ describe('VoiceListenButton', () => {
       expect(toastMocks.ok).toHaveBeenCalledWith('OWVA up/down'),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instance().onresult?.({
       results: [
         Object.assign([{ transcript: 'owva up' }], { isFinal: true }),
@@ -159,7 +183,7 @@ describe('VoiceListenButton', () => {
       expect(toastMocks.err).toHaveBeenCalledWith('deadman_required'),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instance().onresult?.({
       results: [
         Object.assign([{ transcript: 'up' }], { isFinal: true }),
@@ -169,7 +193,7 @@ describe('VoiceListenButton', () => {
       expect(toastMocks.err).toHaveBeenCalledWith('voice failed'),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instance().onresult?.({
       results: [
         Object.assign([{ transcript: 'stop' }], { isFinal: true }),
@@ -179,12 +203,12 @@ describe('VoiceListenButton', () => {
       expect(toastMocks.ok).toHaveBeenCalledWith('STOP commanded (STOP).'),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instance().onerror?.({ error: 'aborted' });
     instance().onerror?.({ error: 'no-speech' });
     await waitFor(() => expect(toastMocks.err).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instance().onerror?.({ error: 'not-allowed' });
     await waitFor(() =>
       expect(toastMocks.err).toHaveBeenCalledWith(
@@ -192,7 +216,7 @@ describe('VoiceListenButton', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instance().onend?.();
     expect(socket.emit).toHaveBeenCalledWith('deadman.release');
   });
@@ -210,7 +234,7 @@ describe('VoiceListenButton', () => {
       label: 'OWVA up/down',
     });
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instances[0]!.onresult?.({
       results: [
         Object.assign([{ transcript: 'owva up' }], { isFinal: true }),
@@ -237,7 +261,7 @@ describe('VoiceListenButton', () => {
       this.stop = vi.fn();
     }) as unknown as typeof window.SpeechRecognition;
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     expect(socket.emit).toHaveBeenCalledWith('deadman.pulse');
   });
 
@@ -250,7 +274,7 @@ describe('VoiceListenButton', () => {
       instances.push(this);
     }) as unknown as typeof window.SpeechRecognition;
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
 
     instances[0]!.onresult?.({
       results: [
@@ -263,7 +287,7 @@ describe('VoiceListenButton', () => {
 
     toastMocks.err.mockClear();
     socket.emit.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     await vi.advanceTimersByTimeAsync(8100);
     expect(instances[instances.length - 1]!.stop).toHaveBeenCalled();
     expect(socket.emit).toHaveBeenCalledWith('deadman.release');
@@ -282,7 +306,7 @@ describe('VoiceListenButton', () => {
       label: 'Enable',
     });
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instances[0]!.onresult?.({
       results: [
         Object.assign([{ transcript: 'enable' }], { isFinal: true }),
@@ -308,7 +332,7 @@ describe('VoiceListenButton', () => {
       return { ok: true };
     });
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instances[0]!.onresult?.({
       results: [
         Object.assign([{ transcript: 'stop' }], { isFinal: true }),
@@ -329,7 +353,7 @@ describe('VoiceListenButton', () => {
       return { ok: true };
     });
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     const results = [] as unknown as ArrayLike<
       { transcript: string } & { isFinal?: boolean }
     > & { length: number };
@@ -359,7 +383,7 @@ describe('VoiceListenButton', () => {
       return { ok: true };
     });
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instances[0]!.onresult?.({
       results: [
         Object.assign([{ transcript: 'xyz' }], { isFinal: true }),
@@ -384,16 +408,16 @@ describe('VoiceListenButton', () => {
       message: 'STOP commanded (STOP).',
     });
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    pressMic();
     instances[0]!.onresult?.({
       results: [
         Object.assign([{ transcript: 'stop' }], { isFinal: true }),
       ] as unknown as ArrayLike<{ transcript: string } & { isFinal?: boolean }>,
     });
     await waitFor(() => expect(toastMocks.ok).toHaveBeenCalled());
-    socket.emit.mockClear();
+    toastMocks.err.mockClear();
     await vi.advanceTimersByTimeAsync(8100);
-    expect(instances[0]!.stop).toHaveBeenCalled();
+    expect(toastMocks.err).not.toHaveBeenCalledWith('Nothing heard');
     vi.useRealTimers();
   });
 });

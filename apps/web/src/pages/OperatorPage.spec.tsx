@@ -2138,9 +2138,46 @@ describe('OperatorPage', () => {
     const enable = screen.getByRole('button', { name: 'Enable' });
     expect(enable).toHaveClass('matrix-enable');
     HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(enable, { pointerId: 42 });
+    // Enable must stay held while the pointer moves toward the header mic.
+    fireEvent.pointerLeave(enable, { pointerId: 42 });
+    fireEvent.pointerMove(enable, {
+      pointerId: 42,
+      clientX: 500,
+      clientY: 500,
+    });
+    const upRocker = screen.getByRole('button', { name: 'OWVA up/down up' });
+    fireEvent.pointerDown(upRocker, { pointerId: 43 });
+    // Mouse up on the mic (not Enable) — window listener releases Enable.
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 42, bubbles: true }),
+    );
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: false }),
+      ),
+    );
+    fireEvent.pointerUp(upRocker, { pointerId: 43 });
     fireEvent.pointerDown(enable);
     fireEvent.lostPointerCapture(enable);
     fireEvent.pointerUp(enable);
+    // Touch Enable uses a no-op capture so the mic finger stays free.
+    vi.useFakeTimers();
+    fireEvent.pointerDown(enable, {
+      pointerType: 'touch',
+      pointerId: 11,
+      clientX: 4,
+      clientY: 4,
+    });
+    await vi.advanceTimersByTimeAsync(150);
+    fireEvent.pointerUp(enable, {
+      pointerType: 'touch',
+      pointerId: 11,
+      clientX: 4,
+      clientY: 4,
+    });
+    vi.useRealTimers();
     expect(screen.getByTitle('Lamp off')).toBeInTheDocument();
     expect(screen.getByTitle('Lamp on')).toBeInTheDocument();
     const up = screen.getByRole('button', { name: 'OWVA up/down up' });

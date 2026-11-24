@@ -7,6 +7,10 @@ import { useT } from '@/lib/i18n';
 import { toastErr, toastOk } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import {
+  beginVoiceKeepEnable,
+  endVoiceKeepEnable,
+} from '@/lib/enable-voice-bridge';
 
 /** Keep deadman pulsed through a short timed voice jog (matches API VOICE_JOG_MS). */
 const VOICE_DEADMAN_HOLD_MS = 2500;
@@ -124,6 +128,7 @@ export function VoiceListenButton() {
   function startVoice() {
     const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Ctor) {
+      endVoiceKeepEnable();
       toastErr('SpeechRecognition not supported in this browser');
       return;
     }
@@ -133,6 +138,10 @@ export function VoiceListenButton() {
     recognition.maxAlternatives = 5;
     recognition.lang = 'en-US';
     let sent = false;
+    const done = () => {
+      endVoiceKeepEnable();
+      setListening(false);
+    };
     startDeadmanHold();
     recognition.onresult = (event) => {
       const phrases: string[] = [];
@@ -150,41 +159,46 @@ export function VoiceListenButton() {
       if (last?.isFinal === false) return;
       if (!heard) {
         recognition.stop();
-        setListening(false);
         stopDeadmanHold();
+        done();
         toastErr(t('nothingHeard'));
         return;
       }
       sent = true;
       void runVoice(heard, phrases).finally(() => {
         recognition.stop();
-        setListening(false);
+        done();
       });
     };
     recognition.onerror = (event) => {
       if (event.error === 'aborted') return;
       sent = true;
       stopDeadmanHold();
+      done();
       toastErr(
         event.error === 'no-speech'
           ? t('nothingHeard')
           : `Microphone error: ${event.error}`,
       );
-      setListening(false);
     };
     recognition.onend = () => {
-      setListening(false);
       if (!sent) {
         stopDeadmanHold();
+        done();
         toastErr(t('nothingHeard'));
+        return;
       }
+      setListening(false);
     };
     setListening(true);
     recognition.start();
     window.setTimeout(() => {
       recognition.stop();
       setListening(false);
-      if (!sent) stopDeadmanHold();
+      if (!sent) {
+        stopDeadmanHold();
+        endVoiceKeepEnable();
+      }
     }, 8000);
   }
 
@@ -202,11 +216,13 @@ export function VoiceListenButton() {
             : 'Listen — hold Enable on Operator, then speak'
         }
         loading={listening}
-        // Keep Enable's pointer hold: do not focus-steal or cancel the other finger.
+        // pointerdown so Listen starts before Enable sees mouseup (one pointer).
         onPointerDown={(event) => {
-          event.preventDefault();
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          beginVoiceKeepEnable();
+          startVoice();
         }}
-        onClick={startVoice}
       >
         <Mic className="size-4" />
       </Button>
