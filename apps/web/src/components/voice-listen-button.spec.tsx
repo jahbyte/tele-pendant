@@ -49,7 +49,10 @@ describe('VoiceListenButton', () => {
 
   it('reports missing speech recognition', async () => {
     renderWithProviders(<VoiceListenButton />);
-    fireEvent.click(screen.getByRole('button', { name: 'Listen' }));
+    const mic = screen.getByRole('button', { name: 'Listen' });
+    const down = fireEvent.pointerDown(mic);
+    expect(down).toBe(false);
+    fireEvent.click(mic);
     await waitFor(() =>
       expect(toastMocks.err).toHaveBeenCalledWith(
         'SpeechRecognition not supported in this browser',

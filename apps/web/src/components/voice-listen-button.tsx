@@ -202,6 +202,10 @@ export function VoiceListenButton() {
             : 'Listen — hold Enable on Operator, then speak'
         }
         loading={listening}
+        // Keep Enable's pointer hold: do not focus-steal or cancel the other finger.
+        onPointerDown={(event) => {
+          event.preventDefault();
+        }}
         onClick={startVoice}
       >
         <Mic className="size-4" />
