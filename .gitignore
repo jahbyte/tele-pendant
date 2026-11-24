@@ -40,6 +40,8 @@ apps/web/dist
 scripts/build-test-report-docx.py
 scripts/handover-native-build.mjs
 *.log
+WILLIAMS_E2E.txt
+WILLIAMS_VIDEO_PROOF.txt
 *.keystore
 *.jks
 *.p12

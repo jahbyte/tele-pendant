@@ -44,6 +44,7 @@ describe('HmiSeedService', () => {
         delete: jest.fn().mockReturnThis(),
         execute: jest.fn().mockResolvedValue(undefined),
       })),
+      count: jest.fn().mockResolvedValue(0),
       find: jest.fn().mockResolvedValue([]),
       save: jest.fn(async (row: unknown) => row),
       create: jest.fn((row: unknown) => row),
@@ -133,5 +134,74 @@ describe('HmiSeedService', () => {
       .mockResolvedValue({ ok: true, cells: 20 });
     await service.onModuleInit();
     expect(reset).not.toHaveBeenCalled();
+  });
+
+  it('adds a plant picture and three live labels when the demo has none', async () => {
+    const { service, backgrounds, overlays, registers } = makeService({
+      cellCount: 12,
+      selectorCount: 3,
+      activeBg: { name: 'demo-p03a21', active: true },
+    });
+    const screen = {
+      id: 'bg-p03',
+      name: 'demo-p03a21',
+      active: true,
+      imageUrl: null as string | null,
+    };
+    backgrounds.findOne.mockResolvedValue(screen);
+    overlays.count.mockResolvedValue(0);
+    registers.findOne.mockImplementation(
+      async (q: { where?: { name?: string } }) => {
+        const name = q.where?.name;
+        if (!name) return null;
+        return { id: `reg-${name}`, name };
+      },
+    );
+    const install = jest
+      .spyOn(
+        service as unknown as { installDemoPlantAsset: () => string | null },
+        'installDemoPlantAsset',
+      )
+      .mockReturnValue('/hmi-assets/demo-p03a21.svg');
+
+    await service.onModuleInit();
+
+    expect(install).toHaveBeenCalled();
+    expect(screen.imageUrl).toBe('/hmi-assets/demo-p03a21.svg');
+    expect(backgrounds.save).toHaveBeenCalledWith(screen);
+    expect(overlays.save).toHaveBeenCalledTimes(3);
+    expect(overlays.create).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'Speed' }),
+    );
+    expect(overlays.create).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'Comms' }),
+    );
+    expect(overlays.create).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'Fault' }),
+    );
+  });
+
+  it('leaves an existing picture and labels alone', async () => {
+    const { service, backgrounds, overlays } = makeService({
+      cellCount: 12,
+      selectorCount: 3,
+      activeBg: { name: 'demo-p03a21', active: true },
+    });
+    backgrounds.findOne.mockResolvedValue({
+      id: 'bg-p03',
+      name: 'demo-p03a21',
+      active: true,
+      imageUrl: '/hmi-assets/custom.svg',
+    });
+    overlays.count.mockResolvedValue(2);
+    const install = jest.spyOn(
+      service as unknown as { installDemoPlantAsset: () => string | null },
+      'installDemoPlantAsset',
+    );
+
+    await service.onModuleInit();
+
+    expect(install).not.toHaveBeenCalled();
+    expect(overlays.save).not.toHaveBeenCalled();
   });
 });

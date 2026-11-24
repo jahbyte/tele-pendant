@@ -1,4 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { copyFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { IsNull } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -10,9 +12,44 @@ import {
 import { Repository } from 'typeorm';
 import { BackgroundDisplay } from '../../backgrounds/entities/background-display.entity';
 import { Cell } from '../../cells/entities/cell.entity';
+import { hmiAssetPublicPath, hmiAssetsDirectory } from '../hmi-assets';
 import { OverlayLabel } from '../../overlays/entities/overlay-label.entity';
 import { RegisterMap } from '../../registers/entities/register-map.entity';
 import { SafetyRoles } from '../../safety/entities/safety-roles.entity';
+
+/** Seeded plant drawing file name under /hmi-assets. */
+const DEMO_PLANT_ASSET = 'demo-p03a21.svg';
+
+/** Live labels that Operator will draw (not cluster-metric names). */
+const DEMO_LIVE_LABELS: Array<{
+  label: string;
+  registerName: string;
+  xPct: number;
+  yPct: number;
+  format: string;
+}> = [
+  {
+    label: 'Speed',
+    registerName: 'holding.speedPct',
+    xPct: 18,
+    yPct: 18,
+    format: '{value}',
+  },
+  {
+    label: 'Comms',
+    registerName: 'discrete.commsOk',
+    xPct: 52,
+    yPct: 18,
+    format: '{value}',
+  },
+  {
+    label: 'Fault',
+    registerName: 'discrete.fault',
+    xPct: 82,
+    yPct: 18,
+    format: '{value}',
+  },
+];
 
 const DEMO_NODE_IDS: Record<string, string> = {
   'coil.deadman': 'ns=1;s=Deadman',
@@ -70,6 +107,88 @@ export class HmiSeedService implements OnModuleInit {
     await this.ensureSafetyRoles();
     await this.ensureSampleTrends();
     await this.attachOrphanCells();
+    await this.ensureDemoPlantExample();
+  }
+
+  /** Paths that may hold docs/samples/hmi/demo-crane.svg in Docker or local cwd. */
+  private demoPlantSvgSources(): string[] {
+    const cwd = process.cwd();
+    return [
+      join(cwd, 'docs', 'samples', 'hmi', 'demo-crane.svg'),
+      join(cwd, '..', '..', 'docs', 'samples', 'hmi', 'demo-crane.svg'),
+      join(
+        cwd,
+        'apps',
+        'api',
+        '..',
+        '..',
+        'docs',
+        'samples',
+        'hmi',
+        'demo-crane.svg',
+      ),
+    ];
+  }
+
+  /** Copy the sample plant drawing into the HMI asset folder. */
+  private installDemoPlantAsset(): string | null {
+    const source = this.demoPlantSvgSources().find((path) => existsSync(path));
+    if (!source) {
+      this.logger.warn(
+        'Demo plant SVG missing under docs/samples/hmi; screen stays without a picture',
+      );
+      return null;
+    }
+    const dest = join(hmiAssetsDirectory(), DEMO_PLANT_ASSET);
+    if (!existsSync(dest)) {
+      copyFileSync(source, dest);
+    }
+    return hmiAssetPublicPath(DEMO_PLANT_ASSET);
+  }
+
+  /**
+   * Fresh demo: plant drawing plus three live labels on demo-p03a21.
+   * Only fills a screen that still has no picture and no labels.
+   */
+  private async ensureDemoPlantExample(
+    screen?: BackgroundDisplay | null,
+  ): Promise<void> {
+    const target =
+      screen ??
+      (await this.backgrounds.findOne({ where: { name: 'demo-p03a21' } }));
+    if (!target || target.name !== 'demo-p03a21') return;
+
+    if (!target.imageUrl?.trim()) {
+      const imageUrl = this.installDemoPlantAsset();
+      if (imageUrl) {
+        target.imageUrl = imageUrl;
+        await this.backgrounds.save(target);
+        this.logger.log(`Demo plant picture set on ${target.name}`);
+      }
+    }
+
+    const existing = await this.overlays.count({
+      where: { background: { id: target.id } },
+    });
+    if (existing > 0) return;
+
+    for (const def of DEMO_LIVE_LABELS) {
+      const register = await this.registers.findOne({
+        where: { name: def.registerName },
+      });
+      if (!register) continue;
+      await this.overlays.save(
+        this.overlays.create({
+          label: def.label,
+          xPct: def.xPct,
+          yPct: def.yPct,
+          format: def.format,
+          background: target,
+          register,
+        }),
+      );
+    }
+    this.logger.log(`Demo live labels seeded on ${target.name}`);
   }
 
   /** Buttons saved with no screen belong on the admin default screen. */
@@ -449,7 +568,7 @@ export class HmiSeedService implements OnModuleInit {
           active: true,
           cssBackground:
             'linear-gradient(165deg, #2a2a2e 0%, #1a1a1c 40%, #3d3a2e 100%)',
-          imageUrl: null,
+          imageUrl: this.installDemoPlantAsset(),
         }),
       );
     } else if (!screen.active) {
@@ -665,5 +784,6 @@ export class HmiSeedService implements OnModuleInit {
     }
 
     await this.ensureSafetyRoles();
+    await this.ensureDemoPlantExample(screen);
   }
 }
