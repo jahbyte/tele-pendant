@@ -178,10 +178,12 @@ export function MediaPage() {
             Plant camera configured
           </p>
         ) : null}
-        <p className="text-xs text-muted-foreground">
-          Voice Listen is in the top header — hold Enable on Operator, then tap
-          the mic.
-        </p>
+        <HelpTip id="tour.media.voice">
+          <p className="text-xs text-muted-foreground">
+            Voice Listen is in the top header — hold Enable on Operator, then
+            tap the mic.
+          </p>
+        </HelpTip>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

@@ -20,6 +20,7 @@ import {
 import { apiGet, apiPost } from './api';
 import { getControlClientId, peekControlClientId } from './control-client-id';
 import { useLocale } from './locale';
+import { HelpTip } from './tour';
 import type { ControlLease } from './types';
 import { getStoredUser } from './user-session';
 
@@ -341,201 +342,203 @@ export function ControlLeaseHeaderControls({ dark }: { dark: boolean }) {
   };
 
   return (
-    <View className="mr-1 flex-row items-center gap-1.5">
-      <View
-        accessibilityRole="text"
-        accessibilityLabel={controlLampLabel}
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: 999,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: '#1f2937',
-          borderWidth: 1,
-          borderColor: '#9ca3af',
-        }}
-      >
-        <Animated.View
-          style={{
-            width: 11,
-            height: 11,
-            borderRadius: 999,
-            backgroundColor: youHold ? '#22c55e' : '#f59e0b',
-            shadowColor: youHold ? '#4ade80' : '#fbbf24',
-            shadowOpacity: 1,
-            shadowRadius: 10,
-            shadowOffset: { width: 0, height: 0 },
-            elevation: 8,
-            opacity: pilotPulse.interpolate({
-              inputRange: [1, 1.55],
-              outputRange: [0.85, 1],
-            }),
-            transform: [
-              {
-                scale: pilotPulse.interpolate({
-                  inputRange: [1, 1.55],
-                  outputRange: [1, 1.12],
-                }),
-              },
-            ],
-          }}
-        />
-      </View>
-      {youHold ? (
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={() => void onRelease()}
-          style={{
-            ...btnBase,
-            backgroundColor: 'rgba(16,185,129,0.15)',
-            borderWidth: 1,
-            borderColor: 'rgba(16,185,129,0.45)',
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 11,
-              fontWeight: '600',
-              color: dark ? '#A7F3D0' : '#065F46',
-            }}
-          >
-            {t('releaseControl')}
-          </Text>
-        </Pressable>
-      ) : controlHeldByOther ? (
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={() => {
-            setError(null);
-            setStealOpen(true);
-          }}
-          style={{
-            ...btnBase,
-            backgroundColor: 'rgba(245,158,11,0.15)',
-            borderWidth: 1,
-            borderColor: 'rgba(245,158,11,0.5)',
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 11,
-              fontWeight: '600',
-              color: dark ? '#FDE68A' : '#92400E',
-            }}
-          >
-            {t('stealControl')}
-          </Text>
-        </Pressable>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={() => void onClaim()}
-          style={{
-            ...btnBase,
-            backgroundColor: '#0284C7',
-          }}
-        >
-          <Text style={{ fontSize: 11, fontWeight: '600', color: '#FFFFFF' }}>
-            {t('claimControl')}
-          </Text>
-        </Pressable>
-      )}
-
-      <Modal
-        visible={stealOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setStealOpen(false)}
-      >
+    <HelpTip id="tour.operator.claim">
+      <View className="mr-1 flex-row items-center gap-1.5">
         <View
+          accessibilityRole="text"
+          accessibilityLabel={controlLampLabel}
           style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.55)',
+            width: 16,
+            height: 16,
+            borderRadius: 999,
+            alignItems: 'center',
             justifyContent: 'center',
-            padding: 24,
+            backgroundColor: '#1f2937',
+            borderWidth: 1,
+            borderColor: '#9ca3af',
           }}
         >
-          <View
+          <Animated.View
             style={{
-              borderRadius: 12,
-              padding: 16,
-              backgroundColor: dark ? '#161D27' : '#FFFFFF',
-              gap: 10,
+              width: 11,
+              height: 11,
+              borderRadius: 999,
+              backgroundColor: youHold ? '#22c55e' : '#f59e0b',
+              shadowColor: youHold ? '#4ade80' : '#fbbf24',
+              shadowOpacity: 1,
+              shadowRadius: 10,
+              shadowOffset: { width: 0, height: 0 },
+              elevation: 8,
+              opacity: pilotPulse.interpolate({
+                inputRange: [1, 1.55],
+                outputRange: [0.85, 1],
+              }),
+              transform: [
+                {
+                  scale: pilotPulse.interpolate({
+                    inputRange: [1, 1.55],
+                    outputRange: [1, 1.12],
+                  }),
+                },
+              ],
+            }}
+          />
+        </View>
+        {youHold ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => void onRelease()}
+            style={{
+              ...btnBase,
+              backgroundColor: 'rgba(16,185,129,0.15)',
+              borderWidth: 1,
+              borderColor: 'rgba(16,185,129,0.45)',
             }}
           >
             <Text
               style={{
-                fontSize: 16,
-                fontWeight: '700',
-                color: dark ? '#E8EEF4' : '#0F1419',
+                fontSize: 11,
+                fontWeight: '600',
+                color: dark ? '#A7F3D0' : '#065F46',
+              }}
+            >
+              {t('releaseControl')}
+            </Text>
+          </Pressable>
+        ) : controlHeldByOther ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => {
+              setError(null);
+              setStealOpen(true);
+            }}
+            style={{
+              ...btnBase,
+              backgroundColor: 'rgba(245,158,11,0.15)',
+              borderWidth: 1,
+              borderColor: 'rgba(245,158,11,0.5)',
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: '600',
+                color: dark ? '#FDE68A' : '#92400E',
               }}
             >
               {t('stealControl')}
             </Text>
-            <Text
-              style={{
-                fontSize: 13,
-                color: dark ? '#8B9AAB' : '#5C6B7A',
-              }}
-            >
-              {t('stealControlHint')}
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => void onClaim()}
+            style={{
+              ...btnBase,
+              backgroundColor: '#0284C7',
+            }}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '600', color: '#FFFFFF' }}>
+              {t('claimControl')}
             </Text>
-            <TextInput
-              value={pin}
-              onChangeText={setPin}
-              secureTextEntry
-              keyboardType="number-pad"
-              placeholder="PIN"
-              placeholderTextColor={dark ? '#8B9AAB' : '#5C6B7A'}
-              style={{
-                borderWidth: 1,
-                borderColor: dark ? '#2A3A4D' : '#C5D0DC',
-                borderRadius: 8,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-                color: dark ? '#E8EEF4' : '#0F1419',
-              }}
-            />
-            {error ? (
-              <Text style={{ color: '#EF4444', fontSize: 12 }}>{error}</Text>
-            ) : null}
+          </Pressable>
+        )}
+
+        <Modal
+          visible={stealOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setStealOpen(false)}
+        >
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              justifyContent: 'center',
+              padding: 24,
+            }}
+          >
             <View
               style={{
-                flexDirection: 'row',
-                gap: 8,
-                justifyContent: 'flex-end',
+                borderRadius: 12,
+                padding: 16,
+                backgroundColor: dark ? '#161D27' : '#FFFFFF',
+                gap: 10,
               }}
             >
-              <Pressable
-                onPress={() => setStealOpen(false)}
-                style={{ paddingHorizontal: 12, paddingVertical: 10 }}
-              >
-                <Text style={{ color: dark ? '#8B9AAB' : '#5C6B7A' }}>
-                  Cancel
-                </Text>
-              </Pressable>
-              <Pressable
-                disabled={busy || !pin.trim()}
-                onPress={() => void onSteal()}
+              <Text
                 style={{
-                  ...btnBase,
-                  backgroundColor: '#0284C7',
+                  fontSize: 16,
+                  fontWeight: '700',
+                  color: dark ? '#E8EEF4' : '#0F1419',
                 }}
               >
-                <Text
-                  style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}
+                {t('stealControl')}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: dark ? '#8B9AAB' : '#5C6B7A',
+                }}
+              >
+                {t('stealControlHint')}
+              </Text>
+              <TextInput
+                value={pin}
+                onChangeText={setPin}
+                secureTextEntry
+                keyboardType="number-pad"
+                placeholder="PIN"
+                placeholderTextColor={dark ? '#8B9AAB' : '#5C6B7A'}
+                style={{
+                  borderWidth: 1,
+                  borderColor: dark ? '#2A3A4D' : '#C5D0DC',
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  color: dark ? '#E8EEF4' : '#0F1419',
+                }}
+              />
+              {error ? (
+                <Text style={{ color: '#EF4444', fontSize: 12 }}>{error}</Text>
+              ) : null}
+              <View
+                style={{
+                  flexDirection: 'row',
+                  gap: 8,
+                  justifyContent: 'flex-end',
+                }}
+              >
+                <Pressable
+                  onPress={() => setStealOpen(false)}
+                  style={{ paddingHorizontal: 12, paddingVertical: 10 }}
                 >
-                  {t('stealControl')}
-                </Text>
-              </Pressable>
+                  <Text style={{ color: dark ? '#8B9AAB' : '#5C6B7A' }}>
+                    Cancel
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={busy || !pin.trim()}
+                  onPress={() => void onSteal()}
+                  style={{
+                    ...btnBase,
+                    backgroundColor: '#0284C7',
+                  }}
+                >
+                  <Text
+                    style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}
+                  >
+                    {t('stealControl')}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </HelpTip>
   );
 }

@@ -45,6 +45,7 @@ import { ConfigUsersSection } from '@/components/config-users-section';
 import {
   alarmSeveritySelectOptions,
   canManageUsers,
+  configSectionForTourTip,
   configSectionIdsForRole,
   normalizeAlarmSeverity,
   type AlarmSeverity,
@@ -267,17 +268,6 @@ function AdminSelect({
   );
 }
 
-const CONFIG_TOUR_SECTION: Record<string, ConfigSectionId> = {
-  'tour.config.plc': 'plc',
-  'tour.config.registers': 'registers',
-  'tour.config.cells': 'cells',
-  'tour.config.labels': 'labels',
-  'tour.config.background': 'background',
-  'tour.config.codes': 'codes',
-  'tour.config.alarms': 'alarms',
-  'tour.config.safety': 'safety',
-};
-
 export function AdminPage() {
   const queryClient = useQueryClient();
   const { t } = useT();
@@ -363,7 +353,7 @@ export function AdminPage() {
 
   useLayoutEffect(() => {
     if (!walkthroughActive || !currentStepId) return;
-    const next = CONFIG_TOUR_SECTION[currentStepId];
+    const next = configSectionForTourTip(currentStepId);
     if (!next) return;
     if (next === section) return;
     if (!configSectionIdsForRole(role).includes(next)) return;
@@ -411,7 +401,11 @@ export function AdminPage() {
       ) : null}
 
       <div className={cn(section !== 'users' && 'hidden')}>
-        {showUsers ? <ConfigUsersSection /> : null}
+        {showUsers ? (
+          <HelpTip id="tour.config.users">
+            <ConfigUsersSection />
+          </HelpTip>
+        ) : null}
       </div>
 
       <div className={cn(section !== 'plc' && 'hidden')}>
@@ -509,8 +503,8 @@ export function AdminPage() {
             <CardHeader>
               <CardTitle>{t('cellsTitle')}</CardTitle>
               <CardDescription>
-                Milestone-1 demo uses the Siemens P03A21 welding pendant layout.
-                API boot migrates legacy crane demos; use reset to reseed
+                Buttons for the selected plant screen. Milestone-1 demo uses the
+                Siemens P03A21 welding pendant. Admins can reset that layout
                 anytime.
               </CardDescription>
             </CardHeader>

@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { apiGet, apiPost, type ControlLease } from './api';
 import { getControlClientId } from './control-client-id';
 import { useT } from './i18n';
+import { HelpTip } from './tour';
 import { getRealtimeSocket } from './realtime';
 
 function readLocalUserId(): string | null {
@@ -288,98 +289,102 @@ export function ControlLeaseHeaderControls() {
   };
 
   return (
-    <div className="flex items-center gap-1.5 sm:gap-2">
-      <span
-        role="status"
-        title={controlLampLabel}
-        aria-label={controlLampLabel}
-        className="operator-pilot"
-      >
+    <HelpTip id="tour.operator.claim">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         <span
-          className={cn(
-            'operator-pilot-lens',
-            youHold ? 'operator-pilot-lens--go' : 'operator-pilot-lens--stop',
-          )}
-        />
-      </span>
-      <span className="sr-only">{controlLampLabel}</span>
-      {youHold ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => void onRelease()}
-          className="h-8 gap-1.5 rounded-full border-emerald-500/45 bg-emerald-500/10 px-3 text-emerald-800 shadow-sm hover:bg-emerald-500/20 dark:text-emerald-200"
+          role="status"
+          title={controlLampLabel}
+          aria-label={controlLampLabel}
+          className="operator-pilot"
         >
-          <Unlock className="size-3.5" />
-          <span>{t('releaseControl')}</span>
-        </Button>
-      ) : controlHeldByOther ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => {
-            setError(null);
-            setStealOpen(true);
-          }}
-          className="h-8 gap-1.5 rounded-full border-amber-500/50 bg-amber-500/10 px-3 text-amber-900 shadow-sm hover:bg-amber-500/20 dark:text-amber-100"
-        >
-          <Hand className="size-3.5" />
-          <span>{t('stealControl')}</span>
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          size="sm"
-          disabled={busy}
-          onClick={() => void onClaim()}
-          className="h-8 gap-1.5 rounded-full bg-sky-600 px-3 text-white shadow-sm hover:bg-sky-500"
-        >
-          <Shield className="size-3.5" />
-          <span>{t('claimControl')}</span>
-        </Button>
-      )}
-      {error ? (
-        <span className="max-w-[10rem] truncate text-[10px] text-destructive sm:max-w-[14rem]">
-          {error}
+          <span
+            className={cn(
+              'operator-pilot-lens',
+              youHold ? 'operator-pilot-lens--go' : 'operator-pilot-lens--stop',
+            )}
+          />
         </span>
-      ) : null}
+        <span className="sr-only">{controlLampLabel}</span>
+        {youHold ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void onRelease()}
+            className="h-8 gap-1.5 rounded-full border-emerald-500/45 bg-emerald-500/10 px-3 text-emerald-800 shadow-sm hover:bg-emerald-500/20 dark:text-emerald-200"
+          >
+            <Unlock className="size-3.5" />
+            <span>{t('releaseControl')}</span>
+          </Button>
+        ) : controlHeldByOther ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => {
+              setError(null);
+              setStealOpen(true);
+            }}
+            className="h-8 gap-1.5 rounded-full border-amber-500/50 bg-amber-500/10 px-3 text-amber-900 shadow-sm hover:bg-amber-500/20 dark:text-amber-100"
+          >
+            <Hand className="size-3.5" />
+            <span>{t('stealControl')}</span>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() => void onClaim()}
+            className="h-8 gap-1.5 rounded-full bg-sky-600 px-3 text-white shadow-sm hover:bg-sky-500"
+          >
+            <Shield className="size-3.5" />
+            <span>{t('claimControl')}</span>
+          </Button>
+        )}
+        {error ? (
+          <span className="max-w-[10rem] truncate text-[10px] text-destructive sm:max-w-[14rem]">
+            {error}
+          </span>
+        ) : null}
 
-      <AlertDialog open={stealOpen} onOpenChange={setStealOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('stealControl')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('stealControlHint')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="grid gap-2">
-            <Label htmlFor="steal-pin">PIN</Label>
-            <Input
-              id="steal-pin"
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-            />
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button
-              type="button"
-              disabled={busy || !pin.trim()}
-              onClick={() => void onSteal()}
-            >
-              {t('stealControl')}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+        <AlertDialog open={stealOpen} onOpenChange={setStealOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('stealControl')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('stealControlHint')}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="grid gap-2">
+              <Label htmlFor="steal-pin">PIN</Label>
+              <Input
+                id="steal-pin"
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+              />
+              {error ? (
+                <p className="text-sm text-destructive">{error}</p>
+              ) : null}
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <Button
+                type="button"
+                disabled={busy || !pin.trim()}
+                onClick={() => void onSteal()}
+              >
+                {t('stealControl')}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </HelpTip>
   );
 }

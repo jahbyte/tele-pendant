@@ -24,10 +24,11 @@ import {
   mobileConfigSectionsForRole,
   type MobileConfigSection,
 } from '../config-sections';
-import { HelpTip } from '../tour';
+import { HelpTip, useTour } from '../tour';
 import { getStoredUserRole } from '../user-session';
 import {
   alarmSeveritySelectOptions,
+  configSectionForTourTip,
   containedImageRect,
   normalizeAlarmSeverity,
   percentInRect,
@@ -175,6 +176,7 @@ type ConfigUser = {
 
 export function ConfigScreen({ token }: { token: string }) {
   const { t } = useLocale();
+  const { walkthroughActive, currentStepId } = useTour();
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [userRole, setUserRole] = useState<UserRole | null>(null);
@@ -221,6 +223,15 @@ export function ConfigScreen({ token }: { token: string }) {
       setSection(sectionOptions[0]?.value ?? 'plc');
     }
   }, [sectionOptions, section]);
+
+  useEffect(() => {
+    if (!walkthroughActive || !currentStepId) return;
+    const next = configSectionForTourTip(currentStepId);
+    if (!next) return;
+    if (next === section) return;
+    if (!sectionOptions.some((s) => s.value === next)) return;
+    setSection(next);
+  }, [walkthroughActive, currentStepId, section, sectionOptions]);
 
   function remember(key: string, text: string) {
     setNotes((current) => ({ ...current, [key]: text }));

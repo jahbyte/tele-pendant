@@ -151,97 +151,99 @@ export function AuditPage() {
         </Alert>
       ) : null}
 
-      <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarRange className="size-4" />
-            Filters
-          </CardTitle>
-          <div className="flex flex-wrap gap-2">
-            {hasFilters ? (
+      <HelpTip id="tour.audit.filters">
+        <Card>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarRange className="size-4" />
+              Filters
+            </CardTitle>
+            <div className="flex flex-wrap gap-2">
+              {hasFilters ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                >
+                  <X />
+                  Clear
+                </Button>
+              ) : null}
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                onClick={clearFilters}
+                loading={exportBusy}
+                onClick={() => void exportCsv()}
               >
-                <X />
-                Clear
+                <Download />
+                Export CSV
               </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              loading={exportBusy}
-              onClick={() => void exportCsv()}
-            >
-              <Download />
-              Export CSV
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <AuditDateField
-            id="audit-from"
-            label="From date"
-            value={from}
-            onChange={(next) => {
-              setFrom(next);
-              setPage(1);
-            }}
-          />
-          <AuditDateField
-            id="audit-to"
-            label="To date"
-            value={to}
-            onChange={(next) => {
-              setTo(next);
-              setPage(1);
-            }}
-          />
-          <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
-            <Label htmlFor="audit-user">Filter by user</Label>
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Input
-                    id="audit-user"
-                    placeholder="Name or email"
-                    value={userFilter}
-                    onChange={(e) => applyUserFilter(e.target.value)}
-                  />
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-xs text-left">
-                  Enter name or email to export individual logs, or leave empty
-                  to export all.
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <div className="grid gap-2">
-            <Label>Rows per page</Label>
-            <Select
-              value={String(pageSize)}
-              onValueChange={(value) => {
-                setPageSize(Number(value));
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <AuditDateField
+              id="audit-from"
+              label="From date"
+              value={from}
+              onChange={(next) => {
+                setFrom(next);
                 setPage(1);
               }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+            />
+            <AuditDateField
+              id="audit-to"
+              label="To date"
+              value={to}
+              onChange={(next) => {
+                setTo(next);
+                setPage(1);
+              }}
+            />
+            <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
+              <Label htmlFor="audit-user">Filter by user</Label>
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Input
+                      id="audit-user"
+                      placeholder="Name or email"
+                      value={userFilter}
+                      onChange={(e) => applyUserFilter(e.target.value)}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs text-left">
+                    Enter name or email to export individual logs, or leave
+                    empty to export all.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <div className="grid gap-2">
+              <Label>Rows per page</Label>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(value) => {
+                  setPageSize(Number(value));
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+      </HelpTip>
 
       <HelpTip id="tour.audit.list">
         <Card>

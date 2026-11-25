@@ -58,7 +58,7 @@ export {
   parseSelectorSideLabels,
   pendantLegendLines,
 } from './selector-rocker';
-export { tourStepsFor } from './tour';
+export { configSectionForTourTip, tourStepsFor } from './tour';
 export type { TourScreen } from './tour';
 export { ASSISTANT_SUGGESTION_GROUPS } from './assistant-suggestions';
 export type { SuggestionGroup } from './assistant-suggestions';

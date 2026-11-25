@@ -177,90 +177,100 @@ export function AssistantScreen({
         </Card>
       </HelpTip>
 
-      {mayEditDocs ? (
-        <Card>
-          <AccordionSection
-            title="Docs settings"
-            subtitle={`Indexed documents: ${indexed}`}
-            open={docsOpen}
-            onToggle={() => setDocsOpen((v) => !v)}
-          >
-            <Hint>Admins can change the docs folder and public docs link.</Hint>
-            <Field
-              label="Docs root path"
-              value={docsRoot}
-              onChangeText={setDocsRoot}
-            />
-            <Field
-              label="Docs link (URL)"
-              value={docsLink}
-              onChangeText={setDocsLink}
-            />
-            <View className="mt-2 flex-row flex-wrap gap-2">
-              <Btn
-                loading={settingsBusy}
-                onPress={() => void saveSettings()}
-                className="mt-0 flex-1"
-              >
-                {!settingsBusy ? <Save size={16} color="#041018" /> : null}
-                <BtnText>Save settings</BtnText>
-              </Btn>
-              <Btn
-                loading={settingsBusy}
-                onPress={() => void reindex()}
-                className="mt-0 flex-1"
-              >
-                {!settingsBusy ? <RefreshCw size={16} color="#041018" /> : null}
-                <BtnText>Reindex</BtnText>
-              </Btn>
-            </View>
-            {docsLink ? (
-              <Btn
-                className="mt-2"
-                onPress={() => void Linking.openURL(docsLink)}
-              >
-                <ExternalLink size={16} color="#041018" />
-                <BtnText>Open docs</BtnText>
-              </Btn>
-            ) : null}
-          </AccordionSection>
-        </Card>
-      ) : (
-        <Hint>Indexed documents: {indexed}. Docs settings are admin-only.</Hint>
-      )}
-
-      <Card>
-        <Text className="mb-1 text-base font-semibold text-foreground">
-          Suggested questions
-        </Text>
-        <Hint>Open a topic, then tap a question to ask.</Hint>
-        {ASSISTANT_SUGGESTION_GROUPS.map((group) => (
-          <AccordionSection
-            key={group.id}
-            title={group.title}
-            open={Boolean(openGroups[group.id])}
-            onToggle={() =>
-              setOpenGroups((current) => ({
-                ...current,
-                [group.id]: !current[group.id],
-              }))
-            }
-          >
-            <View className="gap-1.5">
-              {group.questions.map((item) => (
-                <Pressable
-                  key={item}
-                  disabled={busy}
-                  className="rounded-lg bg-muted px-3 py-2 active:opacity-80 disabled:opacity-50"
-                  onPress={() => void askQuestion(item)}
+      <HelpTip id="tour.assistant.docs">
+        {mayEditDocs ? (
+          <Card>
+            <AccordionSection
+              title="Docs settings"
+              subtitle={`Indexed documents: ${indexed}`}
+              open={docsOpen}
+              onToggle={() => setDocsOpen((v) => !v)}
+            >
+              <Hint>
+                Admins can change the docs folder and public docs link.
+              </Hint>
+              <Field
+                label="Docs root path"
+                value={docsRoot}
+                onChangeText={setDocsRoot}
+              />
+              <Field
+                label="Docs link (URL)"
+                value={docsLink}
+                onChangeText={setDocsLink}
+              />
+              <View className="mt-2 flex-row flex-wrap gap-2">
+                <Btn
+                  loading={settingsBusy}
+                  onPress={() => void saveSettings()}
+                  className="mt-0 flex-1"
                 >
-                  <Text className="text-sm text-foreground">{item}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </AccordionSection>
-        ))}
-      </Card>
+                  {!settingsBusy ? <Save size={16} color="#041018" /> : null}
+                  <BtnText>Save settings</BtnText>
+                </Btn>
+                <Btn
+                  loading={settingsBusy}
+                  onPress={() => void reindex()}
+                  className="mt-0 flex-1"
+                >
+                  {!settingsBusy ? (
+                    <RefreshCw size={16} color="#041018" />
+                  ) : null}
+                  <BtnText>Reindex</BtnText>
+                </Btn>
+              </View>
+              {docsLink ? (
+                <Btn
+                  className="mt-2"
+                  onPress={() => void Linking.openURL(docsLink)}
+                >
+                  <ExternalLink size={16} color="#041018" />
+                  <BtnText>Open docs</BtnText>
+                </Btn>
+              ) : null}
+            </AccordionSection>
+          </Card>
+        ) : (
+          <Hint>
+            Indexed documents: {indexed}. Docs settings are admin-only.
+          </Hint>
+        )}
+      </HelpTip>
+
+      <HelpTip id="tour.assistant.suggestions">
+        <Card>
+          <Text className="mb-1 text-base font-semibold text-foreground">
+            Suggested questions
+          </Text>
+          <Hint>Open a topic, then tap a question to ask.</Hint>
+          {ASSISTANT_SUGGESTION_GROUPS.map((group) => (
+            <AccordionSection
+              key={group.id}
+              title={group.title}
+              open={Boolean(openGroups[group.id])}
+              onToggle={() =>
+                setOpenGroups((current) => ({
+                  ...current,
+                  [group.id]: !current[group.id],
+                }))
+              }
+            >
+              <View className="gap-1.5">
+                {group.questions.map((item) => (
+                  <Pressable
+                    key={item}
+                    disabled={busy}
+                    className="rounded-lg bg-muted px-3 py-2 active:opacity-80 disabled:opacity-50"
+                    onPress={() => void askQuestion(item)}
+                  >
+                    <Text className="text-sm text-foreground">{item}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </AccordionSection>
+          ))}
+        </Card>
+      </HelpTip>
 
       <HelpTip id="tour.assistant.ask">
         <Card>

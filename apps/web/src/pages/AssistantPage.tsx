@@ -140,120 +140,124 @@ export function AssistantPage() {
         </Card>
       </HelpTip>
 
-      {mayEditDocs ? (
-        <Card>
-          <CardContent className="pt-2">
-            <Accordion type="single" collapsible className="w-full">
-              <AccordionItem value="docs-settings" className="border-b-0">
-                <AccordionTrigger>
-                  <span className="flex flex-col items-start gap-0.5 text-left">
-                    <span className="text-base font-semibold">
-                      Docs settings
+      <HelpTip id="tour.assistant.docs">
+        {mayEditDocs ? (
+          <Card>
+            <CardContent className="pt-2">
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="docs-settings" className="border-b-0">
+                  <AccordionTrigger>
+                    <span className="flex flex-col items-start gap-0.5 text-left">
+                      <span className="text-base font-semibold">
+                        Docs settings
+                      </span>
+                      <span className="text-sm font-normal text-muted-foreground">
+                        Indexed documents: {indexed}
+                      </span>
                     </span>
-                    <span className="text-sm font-normal text-muted-foreground">
-                      Indexed documents: {indexed}
-                    </span>
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <p className="mb-3 text-sm text-muted-foreground">
-                    Admins can change the docs folder and public docs link.
-                  </p>
-                  <form
-                    className="grid gap-3"
-                    onSubmit={(e) => void saveSettings(e)}
-                  >
-                    <div className="grid gap-2">
-                      <Label htmlFor="docs-root">Docs root path</Label>
-                      <Input
-                        id="docs-root"
-                        value={docsRoot}
-                        onChange={(e) => setDocsRoot(e.target.value)}
-                        placeholder="docs"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="docs-link">Docs link (URL)</Label>
-                      <Input
-                        id="docs-link"
-                        value={docsLink}
-                        onChange={(e) => setDocsLink(e.target.value)}
-                        placeholder="https://…/USER_MANUAL.md"
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="submit" loading={settingsBusy}>
-                        <Save />
-                        Save settings
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        loading={settingsBusy}
-                        onClick={() => void reindex()}
-                      >
-                        <RefreshCw />
-                        Reindex
-                      </Button>
-                      {docsLink ? (
-                        <Button type="button" variant="ghost" asChild>
-                          <a href={docsLink} target="_blank" rel="noreferrer">
-                            <ExternalLink />
-                            Open docs
-                          </a>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <p className="mb-3 text-sm text-muted-foreground">
+                      Admins can change the docs folder and public docs link.
+                    </p>
+                    <form
+                      className="grid gap-3"
+                      onSubmit={(e) => void saveSettings(e)}
+                    >
+                      <div className="grid gap-2">
+                        <Label htmlFor="docs-root">Docs root path</Label>
+                        <Input
+                          id="docs-root"
+                          value={docsRoot}
+                          onChange={(e) => setDocsRoot(e.target.value)}
+                          placeholder="docs"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="docs-link">Docs link (URL)</Label>
+                        <Input
+                          id="docs-link"
+                          value={docsLink}
+                          onChange={(e) => setDocsLink(e.target.value)}
+                          placeholder="https://…/USER_MANUAL.md"
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="submit" loading={settingsBusy}>
+                          <Save />
+                          Save settings
                         </Button>
-                      ) : null}
-                    </div>
-                  </form>
-                </AccordionContent>
-              </AccordionItem>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          loading={settingsBusy}
+                          onClick={() => void reindex()}
+                        >
+                          <RefreshCw />
+                          Reindex
+                        </Button>
+                        {docsLink ? (
+                          <Button type="button" variant="ghost" asChild>
+                            <a href={docsLink} target="_blank" rel="noreferrer">
+                              <ExternalLink />
+                              Open docs
+                            </a>
+                          </Button>
+                        ) : null}
+                      </div>
+                    </form>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </CardContent>
+          </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Indexed documents: {indexed}. Docs settings are admin-only.
+          </p>
+        )}
+      </HelpTip>
+
+      <HelpTip id="tour.assistant.suggestions">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Suggested questions</CardTitle>
+            <CardDescription>
+              Open a topic, then tap a question to fill the box and ask.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Accordion
+              type="multiple"
+              className="w-full"
+              defaultValue={['safety']}
+            >
+              {ASSISTANT_SUGGESTION_GROUPS.map((group) => (
+                <AccordionItem key={group.id} value={group.id}>
+                  <AccordionTrigger>{group.title}</AccordionTrigger>
+                  <AccordionContent>
+                    <ul className="flex flex-col gap-1.5">
+                      {group.questions.map((item) => (
+                        <li key={item}>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="h-auto w-full justify-start whitespace-normal px-3 py-2 text-left text-sm font-normal"
+                            disabled={busy}
+                            onClick={() => void askQuestion(item)}
+                          >
+                            {item}
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
             </Accordion>
           </CardContent>
         </Card>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Indexed documents: {indexed}. Docs settings are admin-only.
-        </p>
-      )}
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Suggested questions</CardTitle>
-          <CardDescription>
-            Open a topic, then tap a question to fill the box and ask.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Accordion
-            type="multiple"
-            className="w-full"
-            defaultValue={['safety']}
-          >
-            {ASSISTANT_SUGGESTION_GROUPS.map((group) => (
-              <AccordionItem key={group.id} value={group.id}>
-                <AccordionTrigger>{group.title}</AccordionTrigger>
-                <AccordionContent>
-                  <ul className="flex flex-col gap-1.5">
-                    {group.questions.map((item) => (
-                      <li key={item}>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="h-auto w-full justify-start whitespace-normal px-3 py-2 text-left text-sm font-normal"
-                          disabled={busy}
-                          onClick={() => void askQuestion(item)}
-                        >
-                          {item}
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
-        </CardContent>
-      </Card>
+      </HelpTip>
 
       <HelpTip id="tour.assistant.ask">
         <Card>

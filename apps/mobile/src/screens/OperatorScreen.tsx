@@ -1443,33 +1443,39 @@ export function OperatorScreen({ token }: { token: string }) {
       </View>
 
       <View className="min-h-0 flex-1 gap-1 px-2 pb-1 pt-1">
-        {screens.length > 1 ? (
-          <View className="shrink-0 flex-row flex-wrap gap-1">
-            {screens.map((screen) => {
-              const chosen = screen.id === layoutQuery.data?.background?.id;
-              return (
-                <Pressable
-                  key={screen.id}
-                  accessibilityRole="button"
-                  className={`min-h-[22px] rounded-md border px-2 py-0.5 ${
-                    chosen
-                      ? 'border-primary bg-primary'
-                      : 'border-border bg-card'
-                  }`}
-                  onPress={() => void switchScreen(screen.id)}
-                >
-                  <Text
-                    className={`text-[10px] ${
-                      chosen ? 'text-primary-foreground' : 'text-foreground'
+        <HelpTip id="tour.operator.plantScreens">
+          {screens.length > 1 ? (
+            <View className="shrink-0 flex-row flex-wrap gap-1">
+              {screens.map((screen) => {
+                const chosen = screen.id === layoutQuery.data?.background?.id;
+                return (
+                  <Pressable
+                    key={screen.id}
+                    accessibilityRole="button"
+                    className={`min-h-[22px] rounded-md border px-2 py-0.5 ${
+                      chosen
+                        ? 'border-primary bg-primary'
+                        : 'border-border bg-card'
                     }`}
+                    onPress={() => void switchScreen(screen.id)}
                   >
-                    {screen.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
+                    <Text
+                      className={`text-[10px] ${
+                        chosen ? 'text-primary-foreground' : 'text-foreground'
+                      }`}
+                    >
+                      {screen.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : (
+            <Text className="sr-only text-[1px] text-transparent">
+              Plant screen
+            </Text>
+          )}
+        </HelpTip>
 
         <HelpTip id="tour.operator.graphic" className="min-h-0 flex-1">
           <View
@@ -1654,52 +1660,58 @@ export function OperatorScreen({ token }: { token: string }) {
                     </Text>
                   </Pressable>
                 </View>
-                {showJogSpeed ? (
-                  <View
-                    className="flex-row flex-wrap items-center gap-1.5"
-                    accessibilityLabel={t('jogSpeed')}
-                  >
-                    <Text className="text-[11px] text-muted-foreground">
+                <HelpTip id="tour.operator.jogSpeed">
+                  {showJogSpeed ? (
+                    <View
+                      className="flex-row flex-wrap items-center gap-1.5"
+                      accessibilityLabel={t('jogSpeed')}
+                    >
+                      <Text className="text-[11px] text-muted-foreground">
+                        {t('jogSpeed')}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: jogSpeed === 'slow' }}
+                        className="h-8 min-h-8 items-center justify-center rounded-md border px-2.5"
+                        style={{
+                          borderColor:
+                            jogSpeed === 'slow' ? '#3D9CFD' : '#5C6B7A',
+                          backgroundColor:
+                            jogSpeed === 'slow'
+                              ? 'rgba(61,156,253,0.2)'
+                              : 'transparent',
+                        }}
+                        onPress={() => setJogSpeed('slow')}
+                      >
+                        <Text className="text-[11px] font-semibold text-foreground">
+                          {t('jogSlow')}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: jogSpeed === 'fast' }}
+                        className="h-8 min-h-8 items-center justify-center rounded-md border px-2.5"
+                        style={{
+                          borderColor:
+                            jogSpeed === 'fast' ? '#3D9CFD' : '#5C6B7A',
+                          backgroundColor:
+                            jogSpeed === 'fast'
+                              ? 'rgba(61,156,253,0.2)'
+                              : 'transparent',
+                        }}
+                        onPress={() => setJogSpeed('fast')}
+                      >
+                        <Text className="text-[11px] font-semibold text-foreground">
+                          {t('jogFast')}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Text className="sr-only text-[1px] text-transparent">
                       {t('jogSpeed')}
                     </Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: jogSpeed === 'slow' }}
-                      className="h-8 min-h-8 items-center justify-center rounded-md border px-2.5"
-                      style={{
-                        borderColor:
-                          jogSpeed === 'slow' ? '#3D9CFD' : '#5C6B7A',
-                        backgroundColor:
-                          jogSpeed === 'slow'
-                            ? 'rgba(61,156,253,0.2)'
-                            : 'transparent',
-                      }}
-                      onPress={() => setJogSpeed('slow')}
-                    >
-                      <Text className="text-[11px] font-semibold text-foreground">
-                        {t('jogSlow')}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: jogSpeed === 'fast' }}
-                      className="h-8 min-h-8 items-center justify-center rounded-md border px-2.5"
-                      style={{
-                        borderColor:
-                          jogSpeed === 'fast' ? '#3D9CFD' : '#5C6B7A',
-                        backgroundColor:
-                          jogSpeed === 'fast'
-                            ? 'rgba(61,156,253,0.2)'
-                            : 'transparent',
-                      }}
-                      onPress={() => setJogSpeed('fast')}
-                    >
-                      <Text className="text-[11px] font-semibold text-foreground">
-                        {t('jogFast')}
-                      </Text>
-                    </Pressable>
-                  </View>
-                ) : null}
+                  )}
+                </HelpTip>
               </View>
             </HelpTip>
             <HelpTip id="tour.operator.holdHint">

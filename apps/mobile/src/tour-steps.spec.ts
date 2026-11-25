@@ -1,4 +1,4 @@
-import { tourStepsFor } from '@tele-pendant/shared';
+import { configSectionForTourTip, tourStepsFor } from '@tele-pendant/shared';
 
 describe('tourStepsFor', () => {
   it('returns ordered step ids for each screen', () => {
@@ -9,7 +9,64 @@ describe('tourStepsFor', () => {
       'tour.login.signIn',
       'tour.login.face',
     ]);
-    expect(tourStepsFor('operator')[0]).toBe('tour.operator.nav');
-    expect(tourStepsFor('config')).toContain('tour.config.safety');
+    expect(tourStepsFor('operator')).toEqual([
+      'tour.operator.nav',
+      'tour.operator.claim',
+      'tour.header.voice',
+      'tour.operator.banner',
+      'tour.operator.plantScreens',
+      'tour.operator.graphic',
+      'tour.operator.safePin',
+      'tour.operator.matrix',
+      'tour.operator.jogSpeed',
+      'tour.operator.holdHint',
+    ]);
+    expect(tourStepsFor('media')).toEqual([
+      'tour.media.camera',
+      'tour.media.qr',
+      'tour.media.voice',
+    ]);
+    expect(tourStepsFor('ops')).toEqual([
+      'tour.ops.diagnostics',
+      'tour.ops.alarms',
+      'tour.ops.ack',
+      'tour.ops.window',
+      'tour.ops.history',
+      'tour.ops.frequency',
+      'tour.ops.trends',
+    ]);
+    expect(tourStepsFor('face')).toEqual([
+      'tour.face.title',
+      'tour.face.enroll',
+      'tour.face.login',
+    ]);
+    expect(tourStepsFor('audit')).toEqual([
+      'tour.audit.title',
+      'tour.audit.filters',
+      'tour.audit.list',
+    ]);
+    expect(tourStepsFor('assistant')).toEqual([
+      'tour.assistant.title',
+      'tour.assistant.docs',
+      'tour.assistant.suggestions',
+      'tour.assistant.ask',
+    ]);
+    expect(tourStepsFor('config')).toEqual([
+      'tour.config.users',
+      'tour.config.plc',
+      'tour.config.registers',
+      'tour.config.cells',
+      'tour.config.labels',
+      'tour.config.background',
+      'tour.config.codes',
+      'tour.config.alarms',
+      'tour.config.safety',
+    ]);
+  });
+
+  it('maps config tour tips to sections', () => {
+    expect(configSectionForTourTip('tour.config.users')).toBe('users');
+    expect(configSectionForTourTip('tour.config.safety')).toBe('safety');
+    expect(configSectionForTourTip('tour.ops.ack')).toBeNull();
   });
 });

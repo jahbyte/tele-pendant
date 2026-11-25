@@ -117,38 +117,42 @@ export function AuditScreen({ token }: { token: string }) {
       <HelpTip id="tour.audit.title">
         <Section>{t('auditTitle')}</Section>
       </HelpTip>
-      <Hint>
-        Filter by date (YYYY-MM-DD), user name or email. Export CSV on web.
-      </Hint>
-      <Field
-        label="From (YYYY-MM-DD)"
-        value={from}
-        onChangeText={(text) => {
-          setFrom(text);
-          setPage(1);
-        }}
-      />
-      <Field
-        label="To (YYYY-MM-DD)"
-        value={to}
-        onChangeText={(text) => {
-          setTo(text);
-          setPage(1);
-        }}
-      />
-      <Field
-        label="User"
-        value={user}
-        onChangeText={(text) => {
-          setUser(text);
-          setPage(1);
-        }}
-      />
-      <Hint>
-        {total === 0
-          ? 'No entries'
-          : `Page ${page} of ${totalPages} (${total} total)`}
-      </Hint>
+      <HelpTip id="tour.audit.filters">
+        <>
+          <Hint>
+            Filter by date (YYYY-MM-DD), user name or email. Export CSV on web.
+          </Hint>
+          <Field
+            label="From (YYYY-MM-DD)"
+            value={from}
+            onChangeText={(text) => {
+              setFrom(text);
+              setPage(1);
+            }}
+          />
+          <Field
+            label="To (YYYY-MM-DD)"
+            value={to}
+            onChangeText={(text) => {
+              setTo(text);
+              setPage(1);
+            }}
+          />
+          <Field
+            label="User"
+            value={user}
+            onChangeText={(text) => {
+              setUser(text);
+              setPage(1);
+            }}
+          />
+          <Hint>
+            {total === 0
+              ? 'No entries'
+              : `Page ${page} of ${totalPages} (${total} total)`}
+          </Hint>
+        </>
+      </HelpTip>
       <HelpTip id="tour.audit.list">
         <View className="overflow-hidden rounded-xl border border-border bg-card">
           {rows.length === 0 ? (

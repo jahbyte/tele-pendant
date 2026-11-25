@@ -1139,30 +1139,34 @@ export function OperatorPage() {
         ) : null}
 
         <div className="operator-hmi-split">
-          {screens.length > 1 ? (
-            <div
-              className="flex shrink-0 flex-wrap gap-1"
-              role="tablist"
-              aria-label="Plant screens"
-            >
-              {screens.map((screen) => {
-                const chosen = screen.id === layout.background?.id;
-                return (
-                  <Button
-                    key={screen.id}
-                    type="button"
-                    size="sm"
-                    variant={chosen ? 'default' : 'outline'}
-                    className="h-6 px-2 text-[10px]"
-                    aria-selected={chosen}
-                    onClick={() => void switchScreen(screen.id)}
-                  >
-                    {screen.name}
-                  </Button>
-                );
-              })}
-            </div>
-          ) : null}
+          <HelpTip id="tour.operator.plantScreens">
+            {screens.length > 1 ? (
+              <div
+                className="flex shrink-0 flex-wrap gap-1"
+                role="tablist"
+                aria-label="Plant screens"
+              >
+                {screens.map((screen) => {
+                  const chosen = screen.id === layout.background?.id;
+                  return (
+                    <Button
+                      key={screen.id}
+                      type="button"
+                      size="sm"
+                      variant={chosen ? 'default' : 'outline'}
+                      className="h-6 px-2 text-[10px]"
+                      aria-selected={chosen}
+                      onClick={() => void switchScreen(screen.id)}
+                    >
+                      {screen.name}
+                    </Button>
+                  );
+                })}
+              </div>
+            ) : (
+              <span className="sr-only">Plant screen</span>
+            )}
+          </HelpTip>
           <HelpTip id="tour.operator.graphic" className="operator-plant-slot">
             <div
               ref={graphicRef}
@@ -1291,37 +1295,41 @@ export function OperatorPage() {
                     </Button>
                   </div>
                 </HelpTip>
-                {showJogSpeed ? (
-                  <div
-                    className="flex shrink-0 flex-wrap items-center gap-1"
-                    role="group"
-                    aria-label={t('jogSpeed')}
-                  >
-                    <span className="text-[10px] text-muted-foreground">
-                      {t('jogSpeed')}
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={jogSpeed === 'slow' ? 'default' : 'outline'}
-                      className="h-6 min-h-6 px-1.5 text-[10px]"
-                      aria-pressed={jogSpeed === 'slow'}
-                      onClick={() => setJogSpeed('slow')}
+                <HelpTip id="tour.operator.jogSpeed">
+                  {showJogSpeed ? (
+                    <div
+                      className="flex shrink-0 flex-wrap items-center gap-1"
+                      role="group"
+                      aria-label={t('jogSpeed')}
                     >
-                      {t('jogSlow')}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={jogSpeed === 'fast' ? 'default' : 'outline'}
-                      className="h-6 min-h-6 px-1.5 text-[10px]"
-                      aria-pressed={jogSpeed === 'fast'}
-                      onClick={() => setJogSpeed('fast')}
-                    >
-                      {t('jogFast')}
-                    </Button>
-                  </div>
-                ) : null}
+                      <span className="text-[10px] text-muted-foreground">
+                        {t('jogSpeed')}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={jogSpeed === 'slow' ? 'default' : 'outline'}
+                        className="h-6 min-h-6 px-1.5 text-[10px]"
+                        aria-pressed={jogSpeed === 'slow'}
+                        onClick={() => setJogSpeed('slow')}
+                      >
+                        {t('jogSlow')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={jogSpeed === 'fast' ? 'default' : 'outline'}
+                        className="h-6 min-h-6 px-1.5 text-[10px]"
+                        aria-pressed={jogSpeed === 'fast'}
+                        onClick={() => setJogSpeed('fast')}
+                      >
+                        {t('jogFast')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="sr-only">{t('jogSpeed')}</span>
+                  )}
+                </HelpTip>
               </div>
               <HelpTip id="tour.operator.matrix" className="matrix-board">
                 <div

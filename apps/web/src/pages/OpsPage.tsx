@@ -156,6 +156,12 @@ export function OpsPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t('alarms')}</CardTitle>
+            <HelpTip id="tour.ops.ack">
+              <p className="text-sm text-muted-foreground">
+                Ack means you saw it. Supervisors can park an alarm, then bring
+                it back later.
+              </p>
+            </HelpTip>
           </CardHeader>
           <CardContent>
             <Table>
@@ -196,16 +202,31 @@ export function OpsPage() {
                       <TableCell>{a.value}</TableCell>
                       <TableCell>
                         {a.state === 'active' ? (
-                          <HelpTip id="tour.ops.ack">
-                            <div className="flex gap-2">
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void apiPost(`/alarms/${a.id}/ack`)
+                                  .then(() => {
+                                    toastOk(t('ack'));
+                                    return alarms.refetch();
+                                  })
+                                  .catch((err: Error) => toastErr(err.message))
+                              }
+                            >
+                              <CheckCheck /> {t('ack')}
+                            </Button>
+                            {mayShelve ? (
                               <Button
                                 type="button"
                                 size="sm"
-                                variant="outline"
+                                variant="ghost"
                                 onClick={() =>
-                                  void apiPost(`/alarms/${a.id}/ack`)
+                                  void apiPost(`/alarms/${a.id}/shelve`)
                                     .then(() => {
-                                      toastOk(t('ack'));
+                                      toastOk(t('shelve'));
                                       return alarms.refetch();
                                     })
                                     .catch((err: Error) =>
@@ -213,29 +234,10 @@ export function OpsPage() {
                                     )
                                 }
                               >
-                                <CheckCheck /> {t('ack')}
+                                <Pause /> {t('shelve')}
                               </Button>
-                              {mayShelve ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    void apiPost(`/alarms/${a.id}/shelve`)
-                                      .then(() => {
-                                        toastOk(t('shelve'));
-                                        return alarms.refetch();
-                                      })
-                                      .catch((err: Error) =>
-                                        toastErr(err.message),
-                                      )
-                                  }
-                                >
-                                  <Pause /> {t('shelve')}
-                                </Button>
-                              ) : null}
-                            </div>
-                          </HelpTip>
+                            ) : null}
+                          </div>
                         ) : a.state === 'shelved' && mayShelve ? (
                           <Button
                             type="button"
@@ -263,29 +265,31 @@ export function OpsPage() {
         </Card>
       </HelpTip>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {HISTORY_WINDOWS.map((value) => (
+      <HelpTip id="tour.ops.window">
+        <div className="flex flex-wrap items-center gap-2">
+          {HISTORY_WINDOWS.map((value) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={hours === value ? 'default' : 'outline'}
+              aria-pressed={hours === value}
+              onClick={() => setHours(value)}
+            >
+              {windowLabel(value)}
+            </Button>
+          ))}
           <Button
-            key={value}
             type="button"
             size="sm"
-            variant={hours === value ? 'default' : 'outline'}
-            aria-pressed={hours === value}
-            onClick={() => setHours(value)}
+            variant="outline"
+            loading={csvBusy}
+            onClick={() => void downloadHistoryCsv()}
           >
-            {windowLabel(value)}
+            <Download className="size-4" /> {t('downloadCsv')}
           </Button>
-        ))}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          loading={csvBusy}
-          onClick={() => void downloadHistoryCsv()}
-        >
-          <Download className="size-4" /> {t('downloadCsv')}
-        </Button>
-      </div>
+        </div>
+      </HelpTip>
 
       <HelpTip id="tour.ops.history">
         <Card>

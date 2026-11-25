@@ -125,93 +125,103 @@ export function OpsScreen({
       <HelpTip id="tour.ops.alarms">
         <Section>{t('alarms')}</Section>
       </HelpTip>
+      <HelpTip id="tour.ops.ack">
+        <Hint>
+          Ack means you saw it. Supervisors can park an alarm, then bring it
+          back later.
+        </Hint>
+      </HelpTip>
       {(alarms.data ?? []).length === 0 ? <Hint>{t('noAlarms')}</Hint> : null}
       {(alarms.data ?? []).map((alarm) => (
-        <HelpTip key={alarm.id} id="tour.ops.ack">
-          <View className="mb-2">
-            <Hint>
-              [{normalizeAlarmSeverity(alarm.definition.severity)}]{' '}
-              {alarm.definition.name} — {alarm.state} (value {alarm.value})
-            </Hint>
-            {alarm.state === 'active' ? (
-              <View className="mt-1 flex-row gap-4">
+        <View key={alarm.id} className="mb-2">
+          <Hint>
+            [{normalizeAlarmSeverity(alarm.definition.severity)}]{' '}
+            {alarm.definition.name} — {alarm.state} (value {alarm.value})
+          </Hint>
+          {alarm.state === 'active' ? (
+            <View className="mt-1 flex-row gap-4">
+              <LinkText
+                onPress={() =>
+                  void apiPost(
+                    `/alarms/${alarm.id}/ack`,
+                    undefined,
+                    token,
+                  ).then(() => alarms.refetch())
+                }
+              >
+                <Text className="text-primary">
+                  <Check size={12} color="#3D9CFD" /> {t('ack')}
+                </Text>
+              </LinkText>
+              {mayShelve ? (
                 <LinkText
                   onPress={() =>
                     void apiPost(
-                      `/alarms/${alarm.id}/ack`,
+                      `/alarms/${alarm.id}/shelve`,
                       undefined,
                       token,
                     ).then(() => alarms.refetch())
                   }
                 >
                   <Text className="text-primary">
-                    <Check size={12} color="#3D9CFD" /> {t('ack')}
+                    <Pause size={12} color="#3D9CFD" /> {t('shelve')}
                   </Text>
                 </LinkText>
-                {mayShelve ? (
-                  <LinkText
-                    onPress={() =>
-                      void apiPost(
-                        `/alarms/${alarm.id}/shelve`,
-                        undefined,
-                        token,
-                      ).then(() => alarms.refetch())
-                    }
-                  >
-                    <Text className="text-primary">
-                      <Pause size={12} color="#3D9CFD" /> {t('shelve')}
-                    </Text>
-                  </LinkText>
-                ) : null}
-              </View>
-            ) : null}
-            {alarm.state === 'shelved' && mayShelve ? (
-              <View className="mt-1">
-                <LinkText
-                  onPress={() =>
-                    void apiPost(
-                      `/alarms/${alarm.id}/unshelve`,
-                      undefined,
-                      token,
-                    ).then(() => alarms.refetch())
-                  }
-                >
-                  <Text className="text-primary">{t('unshelve')}</Text>
-                </LinkText>
-              </View>
-            ) : null}
-          </View>
-        </HelpTip>
+              ) : null}
+            </View>
+          ) : null}
+          {alarm.state === 'shelved' && mayShelve ? (
+            <View className="mt-1">
+              <LinkText
+                onPress={() =>
+                  void apiPost(
+                    `/alarms/${alarm.id}/unshelve`,
+                    undefined,
+                    token,
+                  ).then(() => alarms.refetch())
+                }
+              >
+                <Text className="text-primary">{t('unshelve')}</Text>
+              </LinkText>
+            </View>
+          ) : null}
+        </View>
       ))}
 
-      <View className="mb-3 mt-2 flex-row flex-wrap gap-2">
-        {HISTORY_WINDOWS.map((value) => {
-          const active = hours === value;
-          return (
-            <Pressable
-              key={value}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              className={`min-h-9 rounded-md border px-3 py-1.5 ${
-                active ? 'border-primary bg-primary' : 'border-border bg-card'
-              }`}
-              onPress={() => setHours(value)}
-            >
-              <Text
-                className={`text-sm font-medium ${
-                  active ? 'text-primary-foreground' : 'text-foreground'
-                }`}
-              >
-                {windowLabel(value)}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      <Btn onPress={() => void shareHistoryCsv()}>
-        <Download size={16} color="#041018" />
-        <BtnText>{t('downloadCsv')}</BtnText>
-      </Btn>
+      <HelpTip id="tour.ops.window">
+        <>
+          <View className="mb-3 mt-2 flex-row flex-wrap gap-2">
+            {HISTORY_WINDOWS.map((value) => {
+              const active = hours === value;
+              return (
+                <Pressable
+                  key={value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  className={`min-h-9 rounded-md border px-3 py-1.5 ${
+                    active
+                      ? 'border-primary bg-primary'
+                      : 'border-border bg-card'
+                  }`}
+                  onPress={() => setHours(value)}
+                >
+                  <Text
+                    className={`text-sm font-medium ${
+                      active ? 'text-primary-foreground' : 'text-foreground'
+                    }`}
+                  >
+                    {windowLabel(value)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Btn onPress={() => void shareHistoryCsv()}>
+            <Download size={16} color="#041018" />
+            <BtnText>{t('downloadCsv')}</BtnText>
+          </Btn>
+        </>
+      </HelpTip>
 
       <HelpTip id="tour.ops.history">
         <>

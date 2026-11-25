@@ -37,6 +37,12 @@ export function FaceScreen({
             </Hint>
           </>
         </HelpTip>
+        <HelpTip id="tour.face.login">
+          <Hint>
+            Face login is on the password sign-in screen when logged out — not
+            here. Enroll below after password sign-in.
+          </Hint>
+        </HelpTip>
         <FaceChallenge
           token={token}
           onToken={onToken}

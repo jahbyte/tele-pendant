@@ -266,11 +266,15 @@ export function MediaScreen({ token }: { token: string }) {
         </>
       </HelpTip>
       {result ? <OkText>{result}</OkText> : null}
-      <Section>{t('voice')}</Section>
-      <Hint>
-        Voice Listen is in the top header — hold Enable on Operator, then tap
-        the mic. {t('phoneVoiceHint')}
-      </Hint>
+      <HelpTip id="tour.media.voice">
+        <>
+          <Section>{t('voice')}</Section>
+          <Hint>
+            Voice Listen is in the top header — hold Enable on Operator, then
+            tap the mic. {t('phoneVoiceHint')}
+          </Hint>
+        </>
+      </HelpTip>
     </ScrollView>
   );
 }

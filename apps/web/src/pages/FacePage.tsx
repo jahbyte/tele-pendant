@@ -294,9 +294,11 @@ export function FacePage({
           ) : (
             <>
               {loggedIn ? (
-                <p className="text-sm text-muted-foreground">
-                  {t('faceEnrollOnlyHint')}
-                </p>
+                <HelpTip id="tour.face.login">
+                  <p className="text-sm text-muted-foreground">
+                    {t('faceEnrollOnlyHint')}
+                  </p>
+                </HelpTip>
               ) : (
                 <div className="grid gap-2">
                   <Label htmlFor="face-email">Email hint (login)</Label>
@@ -311,42 +313,29 @@ export function FacePage({
                   />
                 </div>
               )}
-              {loggedIn ? (
-                <HelpTip id="tour.face.enroll">
+              <HelpTip id="tour.face.enroll">
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() => startChallenge('enroll')}
+                >
+                  <UserPlus /> Enroll (3-step challenge · requires session)
+                </Button>
+              </HelpTip>
+              {!loggedIn ? (
+                <HelpTip id="tour.face.login">
                   <Button
                     type="button"
+                    variant="secondary"
                     className="w-full"
                     disabled={busy}
-                    onClick={() => startChallenge('enroll')}
+                    onClick={() => startChallenge('login')}
                   >
-                    <UserPlus /> Enroll (3-step challenge · requires session)
+                    <ScanFace /> Face login (3-step challenge)
                   </Button>
                 </HelpTip>
-              ) : (
-                <>
-                  <HelpTip id="tour.face.enroll">
-                    <Button
-                      type="button"
-                      className="w-full"
-                      disabled={busy}
-                      onClick={() => startChallenge('enroll')}
-                    >
-                      <UserPlus /> Enroll (3-step challenge · requires session)
-                    </Button>
-                  </HelpTip>
-                  <HelpTip id="tour.face.login">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="w-full"
-                      disabled={busy}
-                      onClick={() => startChallenge('login')}
-                    >
-                      <ScanFace /> Face login (3-step challenge)
-                    </Button>
-                  </HelpTip>
-                </>
-              )}
+              ) : null}
             </>
           )}
           {msg ? (
