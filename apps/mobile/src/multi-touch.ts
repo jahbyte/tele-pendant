@@ -27,11 +27,15 @@ export function touchesStillDown(
  * scrolls and does not press the buttons it slides across. Lifting a finger
  * releases only that finger's button, so Enable can stay down while another
  * finger uses a rocker.
+ *
+ * Sticky keys (Enable) stay pressed through scroll-slop so a second finger
+ * can reach the header mic without dropping Enable (mirrors web pointerLeave).
  */
 export function syncFingers(
   fingers: Map<number, Finger>,
   touches: TouchPoint[],
   hit: (x: number, y: number) => string | null,
+  stickyKey?: (key: string) => boolean,
 ): { press: string[]; release: string[] } {
   const press: string[] = [];
   const release: string[] = [];
@@ -58,6 +62,10 @@ export function syncFingers(
       continue;
     }
     prev.scrolling = true;
+    if (prev.key && stickyKey?.(prev.key)) {
+      // Keep Enable asserted; only mark this finger as scrolling.
+      continue;
+    }
     if (prev.key) release.push(prev.key);
     prev.key = null;
   }

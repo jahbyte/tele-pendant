@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable } from 'react-native';
 import { Mic } from 'lucide-react-native';
+import { Pressable } from 'react-native-gesture-handler';
 import { apiPost } from './api';
 import {
   beginVoiceKeepEnable,

@@ -39,6 +39,21 @@ describe('syncFingers', () => {
     expect(up).toEqual({ press: [], release: [] });
   });
 
+  it('keeps sticky Enable through scroll-slop for header mic', () => {
+    const fingers = new Map<number, Finger>();
+    const sticky = (key: string) => key === 'enable';
+    syncFingers(fingers, [{ id: 1, x: 10, y: 10 }], hit, sticky);
+    const moved = syncFingers(
+      fingers,
+      [{ id: 1, x: 10, y: 40 }],
+      hit,
+      sticky,
+    );
+    expect(moved).toEqual({ press: [], release: [] });
+    expect(fingers.get(1)?.key).toBe('enable');
+    expect(fingers.get(1)?.scrolling).toBe(true);
+  });
+
   it('releases only the finger a lift event still lists', () => {
     const fingers = new Map<number, Finger>();
     syncFingers(

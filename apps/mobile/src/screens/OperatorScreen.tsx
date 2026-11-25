@@ -40,7 +40,10 @@ import { operatorApiError } from '../api-errors';
 import { apiGet, apiPost, getApiBase } from '../api';
 import { getControlClientId } from '../control-client-id';
 import { useControlLease } from '../control-lease';
-import { deferEnableRelease } from '../enable-voice-bridge';
+import {
+  deferEnableRelease,
+  voiceKeepsEnable,
+} from '../enable-voice-bridge';
 import type { Cell, ControlLease, Layout } from '../types';
 import { useLocale } from '../locale';
 import { HelpTip } from '../tour';
@@ -532,12 +535,40 @@ export function OperatorScreen({ token }: { token: string }) {
     const sub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') {
         const held = [...holdsRef.current.values()];
-        holdsRef.current.clear();
-        releaseWaiting.current.clear();
-        fingers.current.clear();
-        bumpHolds();
-        releaseDeadman();
+        const keepEnable = voiceKeepsEnable();
+        const keep: typeof held = [];
+        const drop: typeof held = [];
         for (const hold of held) {
+          const cell = layoutQuery.data?.cells.find(
+            (row) => row.id === hold.cellId,
+          );
+          if (keepEnable && cell?.style === 'enable') {
+            keep.push(hold);
+          } else {
+            drop.push(hold);
+          }
+        }
+        holdsRef.current.clear();
+        for (const hold of keep) {
+          holdsRef.current.set(holdKey(hold.cellId, hold.direction), hold);
+        }
+        releaseWaiting.current.clear();
+        if (!keepEnable) {
+          fingers.current.clear();
+        } else {
+          for (const [id, finger] of [...fingers.current.entries()]) {
+            const target = finger.key
+              ? targets.current.get(finger.key)
+              : undefined;
+            if (target?.cell.style === 'enable') continue;
+            fingers.current.delete(id);
+          }
+        }
+        bumpHolds();
+        if (!keepEnable) {
+          releaseDeadman();
+        }
+        for (const hold of drop) {
           const cell = layoutQuery.data?.cells.find(
             (row) => row.id === hold.cellId,
           );
@@ -695,6 +726,7 @@ export function OperatorScreen({ token }: { token: string }) {
           }
           return null;
         },
+        (key) => targets.current.get(key)?.cell.style === 'enable',
       );
       for (const key of release) {
         const target = targets.current.get(key);
