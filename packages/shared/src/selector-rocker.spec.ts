@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MIN_JOG_PULSE_MS,
   cellPulsesDeadman,
   cellRequiresControlLease,
   cellUsesCommandHoldWatchdog,
@@ -99,6 +100,12 @@ describe('cellPulsesDeadman', () => {
   it('pulses only motion holds', () => {
     expect(cellPulsesDeadman({ isMotion: true })).toBe(true);
     expect(cellPulsesDeadman({ isMotion: false })).toBe(false);
+  });
+});
+
+describe('MIN_JOG_PULSE_MS', () => {
+  it('is long enough for a short tap to move the axis', () => {
+    expect(MIN_JOG_PULSE_MS).toBeGreaterThanOrEqual(150);
   });
 });
 

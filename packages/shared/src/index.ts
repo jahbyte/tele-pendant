@@ -51,6 +51,7 @@ export type {
   MatrixCellUiState,
 } from './matrix-cell-state';
 export {
+  MIN_JOG_PULSE_MS,
   cellPulsesDeadman,
   cellRequiresControlLease,
   cellUsesCommandHoldWatchdog,

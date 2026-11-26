@@ -10,6 +10,7 @@ import {
   tagValueForRegister,
 } from '../lib/operator-helpers';
 import {
+  MIN_JOG_PULSE_MS,
   cellPulsesDeadman,
   cellRequiresControlLease,
   cellUsesCommandHoldWatchdog,
@@ -101,6 +102,7 @@ type HeldButton = {
   direction: 'a' | 'b' | null;
   gen: number;
   pulses: boolean;
+  pressedAt: number;
 };
 
 function holdKey(cellId: string, direction?: 'a' | 'b' | null): string {
@@ -151,6 +153,15 @@ export function OperatorPage() {
   const [tags, setTags] = useState<LiveTags | null>(null);
   const [safety, setSafety] = useState<HmiLayout['safety'] | null>(null);
   const holdsRef = useRef(new Map<string, HeldButton>());
+  /** Activate(true) still in flight — release must not kill deadman yet. */
+  const inflightRef = useRef(new Set<string>());
+  /** Short taps: finish the nudge after activate, then drop. */
+  const releaseWaitingRef = useRef(new Map<string, 'a' | 'b' | null>());
+  /** Longer holds released mid-flight: do not start motion late. */
+  const releaseAbortedRef = useRef(new Set<string>());
+  /** When activate(true) landed — short taps keep the coil ON until min pulse. */
+  const armedAtRef = useRef(new Map<string, number>());
+  const minPulseTimersRef = useRef(new Map<string, number>());
   /** Pointer ids currently holding Enable (no capture — mic needs the pointer). */
   const enablePointersRef = useRef(new Set<number>());
   const [heldVersion, setHeldVersion] = useState(0);
@@ -485,6 +496,44 @@ export function OperatorPage() {
     attempt(1);
   }
 
+  function clearMinPulseTimer(key: string) {
+    const timer = minPulseTimersRef.current.get(key);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      minPulseTimersRef.current.delete(key);
+    }
+  }
+
+  function finishDeferredRelease(
+    key: string,
+    cell: CellDto,
+    direction?: 'a' | 'b' | null,
+  ) {
+    clearMinPulseTimer(key);
+    releaseWaitingRef.current.delete(key);
+    releaseAbortedRef.current.delete(key);
+    armedAtRef.current.delete(key);
+    dropCoil(cell, direction);
+    if (cellPulsesDeadman(cell) && !motionStillHeld()) releaseDeadman();
+  }
+
+  /** Keep coil ON until MIN_JOG_PULSE_MS after activate(true) for short taps. */
+  function scheduleMinPulseRelease(
+    key: string,
+    cell: CellDto,
+    direction: 'a' | 'b' | null,
+    armedAt: number,
+  ) {
+    clearMinPulseTimer(key);
+    const remain = Math.max(0, MIN_JOG_PULSE_MS - (Date.now() - armedAt));
+    releaseWaitingRef.current.set(key, direction);
+    const timer = window.setTimeout(() => {
+      minPulseTimersRef.current.delete(key);
+      finishDeferredRelease(key, cell, direction);
+    }, remain);
+    minPulseTimersRef.current.set(key, timer);
+  }
+
   async function pressCell(cell: CellDto, direction?: 'a' | 'b') {
     setMessage(null);
     const needsLease = cellRequiresControlLease(cell);
@@ -512,7 +561,12 @@ export function OperatorPage() {
         direction: direction ?? null,
         gen: pressGen,
         pulses: cellPulsesDeadman(cell),
+        pressedAt: Date.now(),
       });
+      releaseWaitingRef.current.delete(key);
+      releaseAbortedRef.current.delete(key);
+      clearMinPulseTimer(key);
+      armedAtRef.current.delete(key);
       bumpHolds();
     }
     const speed =
@@ -524,6 +578,8 @@ export function OperatorPage() {
       const held = holdsRef.current.get(key);
       return Boolean(held && held.gen === pressGen);
     };
+    const wantsTapPulse = () => releaseWaitingRef.current.has(key);
+    const wasAborted = () => releaseAbortedRef.current.has(key);
     const activateTrue = () =>
       activate.mutateAsync({
         id: cell.id,
@@ -531,15 +587,23 @@ export function OperatorPage() {
         speed,
         ...(direction ? { direction } : {}),
       });
+    if (holdToRun) inflightRef.current.add(key);
     try {
       // Await deadman ack before HTTP activate so WS lag cannot refuse the jog.
-      // Still activate after a quick tap that released during the ack wait —
-      // then dropCoil below clears the coil.
+      // Short taps set releaseWaiting and still complete a min pulse below.
       if (cellPulsesDeadman(cell)) {
         await ensureDeadman();
       }
+      if (wasAborted()) {
+        finishDeferredRelease(key, cell, direction ?? null);
+        return;
+      }
       const maxAttempts = cellPulsesDeadman(cell) ? 4 : 1;
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (wasAborted()) {
+          finishDeferredRelease(key, cell, direction ?? null);
+          return;
+        }
         try {
           await activateTrue();
           break;
@@ -552,15 +616,22 @@ export function OperatorPage() {
             attempt,
             message: msg,
           });
-          if (!motionBlocked || !stillHeld() || attempt >= maxAttempts) {
+          const keepTrying =
+            motionBlocked &&
+            (stillHeld() || wantsTapPulse()) &&
+            !wasAborted() &&
+            attempt < maxAttempts;
+          if (!keepTrying) {
             throw err;
           }
           await ensureDeadman();
         }
       }
-      if (holdToRun && !stillHeld()) {
-        // Released while activate(true) was in flight — drop the coil.
-        dropCoil(cell, direction);
+      const armedAt = Date.now();
+      if (holdToRun) armedAtRef.current.set(key, armedAt);
+      if (holdToRun && (wantsTapPulse() || !stillHeld())) {
+        // Short tap / early release: keep coil ON long enough to move the axis.
+        scheduleMinPulseRelease(key, cell, direction ?? null, armedAt);
         return;
       }
       if (holdToRun) {
@@ -577,11 +648,19 @@ export function OperatorPage() {
           message: err instanceof Error ? err.message : String(err),
         });
       }
+      clearMinPulseTimer(key);
+      releaseWaitingRef.current.delete(key);
+      releaseAbortedRef.current.delete(key);
+      armedAtRef.current.delete(key);
       if (stillHeld()) {
         holdsRef.current.delete(key);
         bumpHolds();
         if (cellPulsesDeadman(cell) && !motionStillHeld()) releaseDeadman();
+      } else if (cellPulsesDeadman(cell) && !motionStillHeld()) {
+        releaseDeadman();
       }
+    } finally {
+      inflightRef.current.delete(key);
     }
   }
 
@@ -590,13 +669,38 @@ export function OperatorPage() {
     const key = holdKey(cell.id, direction);
     const held = holdsRef.current.get(key);
     if (!held) return;
+    const pressAgeMs = Date.now() - held.pressedAt;
     holdsRef.current.delete(key);
     const dropped: Array<{ cell: CellDto; direction: 'a' | 'b' | null }> = [];
     if (cell.style === 'enable') {
       for (const [otherKey, otherHold] of [...holdsRef.current.entries()]) {
         if (!otherHold.pulses) continue;
         holdsRef.current.delete(otherKey);
-        dropped.push({ cell: otherHold.cell, direction: otherHold.direction });
+        const otherDir = otherHold.direction;
+        if (inflightRef.current.has(otherKey)) {
+          const otherAge = Date.now() - otherHold.pressedAt;
+          if (otherAge <= MIN_JOG_PULSE_MS) {
+            releaseWaitingRef.current.set(otherKey, otherDir);
+          } else {
+            releaseAbortedRef.current.add(otherKey);
+          }
+          continue;
+        }
+        const otherArmed = armedAtRef.current.get(otherKey);
+        if (
+          otherHold.pulses &&
+          otherArmed !== undefined &&
+          Date.now() - otherArmed < MIN_JOG_PULSE_MS
+        ) {
+          scheduleMinPulseRelease(
+            otherKey,
+            otherHold.cell,
+            otherDir,
+            otherArmed,
+          );
+          continue;
+        }
+        dropped.push({ cell: otherHold.cell, direction: otherDir });
       }
     }
     bumpHolds();
@@ -606,6 +710,28 @@ export function OperatorPage() {
       direction: held.direction,
       pulses: holdPulseCount.current,
     });
+    const releaseDir = direction ?? held.direction;
+    if (inflightRef.current.has(key)) {
+      // Finger up before activate finished: short tap → min pulse; else abort.
+      if (pressAgeMs <= MIN_JOG_PULSE_MS) {
+        releaseWaitingRef.current.set(key, releaseDir);
+      } else {
+        releaseAbortedRef.current.add(key);
+        if (!motionStillHeld()) releaseDeadman();
+      }
+      return;
+    }
+    const armedAt = armedAtRef.current.get(key);
+    if (
+      held.pulses &&
+      armedAt !== undefined &&
+      Date.now() - armedAt < MIN_JOG_PULSE_MS
+    ) {
+      // Activate already returned but the tap was shorter than the min pulse.
+      scheduleMinPulseRelease(key, cell, releaseDir, armedAt);
+      return;
+    }
+    armedAtRef.current.delete(key);
     if (!motionStillHeld()) releaseDeadman();
     // Fire-and-forget: awaiting activate-false stacked Modbus work behind the
     // next press and caused live-tag jumps in prod (700–2500ms).
@@ -642,14 +768,32 @@ export function OperatorPage() {
 
   useEffect(() => {
     const arms = touchArms.current;
-    return () => clearTouchArms(arms);
+    const timers = minPulseTimersRef.current;
+    return () => {
+      clearTouchArms(arms);
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      timers.clear();
+    };
   }, []);
 
   useEffect(() => {
     const dropHeld = () => {
       const held = [...holdsRef.current.values()];
-      if (held.length === 0) return;
+      const waiting = [...releaseWaitingRef.current.entries()];
+      if (
+        held.length === 0 &&
+        waiting.length === 0 &&
+        armedAtRef.current.size === 0
+      ) {
+        return;
+      }
+      for (const key of minPulseTimersRef.current.keys()) {
+        clearMinPulseTimer(key);
+      }
       holdsRef.current.clear();
+      releaseWaitingRef.current.clear();
+      releaseAbortedRef.current.clear();
+      armedAtRef.current.clear();
       bumpHolds();
       releaseDeadman();
       for (const hold of held) {
@@ -660,6 +804,13 @@ export function OperatorPage() {
         void apiPost(`/hmi/cells/${hold.cellId}/activate`, {
           value: false,
           ...(hold.direction ? { direction: hold.direction } : {}),
+        }).catch(() => undefined);
+      }
+      for (const [key, direction] of waiting) {
+        const cellId = key.split(':')[0]!;
+        void apiPost(`/hmi/cells/${cellId}/activate`, {
+          value: false,
+          ...(direction ? { direction } : {}),
         }).catch(() => undefined);
       }
     };

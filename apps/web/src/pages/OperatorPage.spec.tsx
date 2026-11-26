@@ -623,6 +623,19 @@ describe('OperatorPage', () => {
     renderOperator(<OperatorPage />);
     const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
     fireEvent.pointerDown(hoist);
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/m1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    const falsesBefore = vi.mocked(api.apiPost).mock.calls.filter((call) => {
+      const [path, body] = call;
+      return (
+        path === '/hmi/cells/m1/activate' &&
+        (body as { value?: boolean } | undefined)?.value === false
+      );
+    }).length;
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       get: () => 'visible',
@@ -636,7 +649,8 @@ describe('OperatorPage', () => {
           (body as { value?: boolean } | undefined)?.value === false
         );
       }),
-    ).toHaveLength(0);
+    ).toHaveLength(falsesBefore);
+    fireEvent.pointerUp(hoist);
   });
 
   it('tolerates pointer release failures and ignored coil drops', async () => {
@@ -836,10 +850,283 @@ describe('OperatorPage', () => {
   });
 
   it('stops Motion blocked retries when the finger is released mid-retry', async () => {
-    let activateCalls = 0;
-    mockPostWithControl(async (path) => {
+    let activateTrueCalls = 0;
+    mockPostWithControl(async (path, body) => {
       if (String(path).includes('/hmi/cells/')) {
-        activateCalls += 1;
+        if ((body as { value?: boolean } | undefined)?.value === true) {
+          activateTrueCalls += 1;
+          throw new Error(
+            'Motion blocked: claim control, hold deadman, and ensure normal safety mode',
+          );
+        }
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    await waitFor(() => expect(activateTrueCalls).toBeGreaterThanOrEqual(1));
+    // Hold past the short-tap window so release aborts instead of nudging.
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    fireEvent.pointerUp(hoist);
+    await waitFor(() =>
+      expect(screen.getByText(/Motion blocked/i)).toBeInTheDocument(),
+    );
+    // One in-flight attempt may still land; then true-retries must stop.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const stable = activateTrueCalls;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(activateTrueCalls).toBe(stable);
+  });
+
+  it('keeps a short jog tap on long enough for the axis to move', async () => {
+    const posts: Array<{ at: number; value: boolean }> = [];
+    mockPostWithControl(async (path, body) => {
+      if (String(path).includes('/hmi/cells/')) {
+        posts.push({
+          at: Date.now(),
+          value: Boolean((body as { value?: boolean }).value),
+        });
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    fireEvent.pointerUp(hoist);
+    await waitFor(() =>
+      expect(posts.some((post) => post.value === true)).toBe(true),
+    );
+    await waitFor(() =>
+      expect(posts.some((post) => post.value === false)).toBe(true),
+    );
+    const onAt = posts.find((post) => post.value === true)!.at;
+    const offAt = posts.find((post) => post.value === false)!.at;
+    // Min pulse is 200ms; allow a little timer slack under coverage load.
+    expect(offAt - onAt).toBeGreaterThanOrEqual(140);
+  });
+
+  it('drops a deferred short-tap coil on pagehide', async () => {
+    mockPostWithControl(async () => ({ ok: true }));
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/m1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    fireEvent.pointerUp(hoist);
+    (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
+    window.dispatchEvent(new Event('pagehide'));
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/m1/activate',
+        expect.objectContaining({ value: false }),
+      ),
+    );
+  });
+
+  it('aborts a long in-flight jog when the finger lifts before activate returns', async () => {
+    let finishPress: (value: unknown) => void = () => undefined;
+    mockPostWithControl(async (path, body) => {
+      if (
+        String(path).includes('/activate') &&
+        (body as { value?: boolean }).value === true
+      ) {
+        return new Promise((resolve, reject) => {
+          finishPress = (value: unknown) => {
+            if (value instanceof Error) reject(value);
+            else resolve(value);
+          };
+        });
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/m1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    fireEvent.pointerUp(hoist);
+    finishPress(
+      new Error(
+        'Motion blocked: claim control, hold deadman, and ensure normal safety mode',
+      ),
+    );
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('deadman.release'),
+    );
+  });
+
+  it('covers Enable releasing armed, in-flight, and deferred jog coils', async () => {
+    const pendantLayout = {
+      ...layout,
+      matrix: { rows: 1, cols: 2 },
+      cells: [
+        {
+          id: 'en1',
+          row: 0,
+          col: 0,
+          label: 'Enable',
+          style: 'enable',
+          isMotion: false,
+          requiresSafeAction: false,
+          primaryRegister: {
+            id: 'pe',
+            name: 'coil.p03a21.di.enable',
+            address: 43,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+        {
+          id: 'home1',
+          row: 0,
+          col: 1,
+          label: 'Move Home Position',
+          style: 'pushbutton',
+          isMotion: true,
+          requiresSafeAction: false,
+          variableSpeed: false,
+          primaryRegister: {
+            id: 'ph',
+            name: 'coil.p03a21.di.moveHome',
+            address: 30,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+      ],
+    };
+    mockGetWithControl(pendantLayout);
+    let finishHome: (value: unknown) => void = () => undefined;
+    let homeTrueCalls = 0;
+    const posts: Array<{ path: string; value: boolean }> = [];
+    mockPostWithControl(async (path, body) => {
+      if (String(path).includes('/activate')) {
+        const value = Boolean((body as { value?: boolean }).value);
+        posts.push({ path: String(path), value });
+        if (String(path).includes('/hmi/cells/home1/') && value) {
+          homeTrueCalls += 1;
+          if (homeTrueCalls === 1) {
+            return new Promise((resolve) => {
+              finishHome = resolve;
+            });
+          }
+        }
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    const enable = await screen.findByRole('button', { name: 'Enable' });
+    const home = screen.getByRole('button', { name: 'Move Home Position' });
+
+    // 1) Enable drops an in-flight jog after the short-tap window (abort).
+    fireEvent.pointerDown(enable);
+    fireEvent.pointerDown(home);
+    await waitFor(() => expect(homeTrueCalls).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    fireEvent.pointerUp(enable);
+    finishHome({ ok: true });
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('deadman.release'),
+    );
+
+    // 2) Enable drops an armed jog inside the min-pulse window (deferred).
+    socket.emit.mockClear();
+    posts.length = 0;
+    fireEvent.pointerDown(enable);
+    fireEvent.pointerDown(home);
+    await waitFor(() =>
+      expect(
+        posts.some(
+          (p) => p.path.includes('/hmi/cells/home1/activate') && p.value,
+        ),
+      ).toBe(true),
+    );
+    fireEvent.pointerUp(enable);
+    const homeFalse = () =>
+      posts.filter(
+        (p) => p.path.includes('/hmi/cells/home1/activate') && !p.value,
+      ).length;
+    expect(homeFalse()).toBe(0);
+    await waitFor(() => expect(homeFalse()).toBeGreaterThan(0), {
+      timeout: 3000,
+    });
+
+    // 3) Enable drops an armed jog after the min-pulse window (immediate).
+    posts.length = 0;
+    fireEvent.pointerDown(enable);
+    fireEvent.pointerDown(home);
+    await waitFor(() =>
+      expect(
+        posts.some(
+          (p) => p.path.includes('/hmi/cells/home1/activate') && p.value,
+        ),
+      ).toBe(true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    fireEvent.pointerUp(enable);
+    await waitFor(() => expect(homeFalse()).toBeGreaterThan(0));
+  });
+
+  it('aborts activate when the finger lifts during a slow deadman ack', async () => {
+    let ackDeadman: ((snap: { deadmanActive: boolean }) => void) | undefined;
+    socket.emit.mockImplementation((event: string, ...args: unknown[]) => {
+      const cb = args.find((a) => typeof a === 'function') as
+        ((snap: { deadmanActive: boolean }) => void) | undefined;
+      if (event === 'deadman.pulse' && cb) {
+        ackDeadman = cb;
+      }
+    });
+    mockPostWithControl(async () => ({ ok: true }));
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    await waitFor(() => expect(ackDeadman).toBeTypeOf('function'));
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    fireEvent.pointerUp(hoist);
+    ackDeadman!({ deadmanActive: true });
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('deadman.release'),
+    );
+  });
+
+  it('aborts between Motion blocked retries when the finger lifts', async () => {
+    let pulseCount = 0;
+    let pendingAck: ((snap: { deadmanActive: boolean }) => void) | undefined;
+    socket.emit.mockImplementation((event: string, ...args: unknown[]) => {
+      const cb = args.find((a) => typeof a === 'function') as
+        ((snap: { deadmanActive: boolean }) => void) | undefined;
+      if (event === 'deadman.pulse' && cb) {
+        pulseCount += 1;
+        if (pulseCount === 1) cb({ deadmanActive: true });
+        else pendingAck = cb;
+      }
+    });
+    let activateTrueCalls = 0;
+    mockPostWithControl(async (path, body) => {
+      if (
+        String(path).includes('/activate') &&
+        (body as { value?: boolean }).value === true
+      ) {
+        activateTrueCalls += 1;
         throw new Error(
           'Motion blocked: claim control, hold deadman, and ensure normal safety mode',
         );
@@ -850,10 +1137,110 @@ describe('OperatorPage', () => {
     const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
     HTMLElement.prototype.setPointerCapture = vi.fn();
     fireEvent.pointerDown(hoist);
-    await waitFor(() => expect(activateCalls).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(activateTrueCalls).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(pendingAck).toBeTypeOf('function'));
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    fireEvent.pointerUp(hoist);
+    pendingAck!({ deadmanActive: true });
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('deadman.release'),
+    );
+    const stable = activateTrueCalls;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(activateTrueCalls).toBe(stable);
+  });
+
+  it('ignores failed deferred drops on pagehide', async () => {
+    mockGetWithControl({
+      ...layout,
+      matrix: { rows: 1, cols: 1 },
+      cells: [
+        {
+          id: 'owva',
+          row: 0,
+          col: 0,
+          label: 'OWVA up/down',
+          style: 'selector',
+          isMotion: true,
+          requiresSafeAction: false,
+          variableSpeed: false,
+          primaryRegister: {
+            id: 'pa',
+            name: 'coil.p03a21.di.owvaUp',
+            address: 26,
+            kind: 'coil',
+          },
+          secondaryRegister: {
+            id: 'pb',
+            name: 'coil.p03a21.di.owvaDown',
+            address: 27,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+      ],
+    });
+    mockPostWithControl(async (path, body) => {
+      if (
+        String(path).includes('/activate') &&
+        (body as { value?: boolean }).value === false
+      ) {
+        throw new Error('drop failed');
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    const up = await screen.findByRole('button', { name: 'OWVA up/down up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(up);
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/owva/activate',
+        expect.objectContaining({ value: true, direction: 'a' }),
+      ),
+    );
+    fireEvent.pointerUp(up);
+    window.dispatchEvent(new Event('pagehide'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+
+  it('keeps deadman when aborting one jog while another is still held', async () => {
+    let finishSecond: (value: unknown) => void = () => undefined;
+    let secondStarted = false;
+    mockPostWithControl(async (path, body) => {
+      if (
+        String(path).includes('/hmi/cells/t1/') &&
+        (body as { value?: boolean }).value === true
+      ) {
+        secondStarted = true;
+        return new Promise((resolve) => {
+          finishSecond = resolve;
+        });
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    const trolley = screen.getByRole('button', { name: 'Trolley L' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/m1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    fireEvent.pointerDown(trolley);
+    await waitFor(() => expect(secondStarted).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    socket.emit.mockClear();
+    fireEvent.pointerUp(trolley);
+    expect(socket.emit).not.toHaveBeenCalledWith('deadman.release');
+    finishSecond({ ok: true });
     fireEvent.pointerUp(hoist);
     await waitFor(() =>
-      expect(screen.getByText(/Motion blocked/i)).toBeInTheDocument(),
+      expect(socket.emit).toHaveBeenCalledWith('deadman.release'),
     );
   });
 
@@ -1047,12 +1434,20 @@ describe('OperatorPage', () => {
     const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
     fireEvent.pointerDown(hoist);
     fireEvent.pointerUp(hoist);
-    finishPress({ ok: true });
     await waitFor(() =>
       expect(api.apiPost).toHaveBeenCalledWith(
         '/hmi/cells/m1/activate',
-        expect.objectContaining({ value: false }),
+        expect.objectContaining({ value: true }),
       ),
+    );
+    finishPress({ ok: true });
+    await waitFor(
+      () =>
+        expect(api.apiPost).toHaveBeenCalledWith(
+          '/hmi/cells/m1/activate',
+          expect.objectContaining({ value: false }),
+        ),
+      { timeout: 3000 },
     );
   });
 
@@ -1290,6 +1685,8 @@ describe('OperatorPage', () => {
         expect.objectContaining({ value: true }),
       ),
     );
+    // Past min pulse so release drops immediately with this cell's payload.
+    await new Promise((resolve) => setTimeout(resolve, 220));
     (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
     fireEvent.pointerUp(hoist);
     await waitFor(() =>
@@ -2551,6 +2948,20 @@ describe('OperatorPage', () => {
     });
     fireEvent.pointerDown(home);
     fireEvent.pointerDown(weld);
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/home1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/weld1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    // Hold past the min jog pulse so release drops immediately (not deferred).
+    await new Promise((resolve) => setTimeout(resolve, 220));
     socket.emit.mockClear();
     fireEvent.pointerUp(home);
     expect(socket.emit).not.toHaveBeenCalledWith('deadman.release');
@@ -2572,8 +2983,17 @@ describe('OperatorPage', () => {
     socket.emit.mockClear();
     fireEvent.pointerDown(enable);
     fireEvent.pointerDown(home);
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/home1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    socket.emit.mockClear();
     fireEvent.pointerUp(home);
-    expect(socket.emit).toHaveBeenCalledWith('deadman.release');
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('deadman.release'),
+    );
 
     const posts: string[] = [];
     mockPostWithControl(async (path, body) => {

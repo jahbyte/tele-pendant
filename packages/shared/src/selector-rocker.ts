@@ -81,6 +81,12 @@ export function cellPulsesDeadman(cell: { isMotion: boolean }): boolean {
 }
 
 /**
+ * Short jog taps (under the touch press delay) must still leave the coil ON
+ * long enough for the axis to move before activate(false).
+ */
+export const MIN_JOG_PULSE_MS = 200;
+
+/**
  * Non-motion pushbuttons (Teach, Seam, …) use a command-hold pulse watchdog so a
  * lost activate(false) cannot leave the coil ON. Enable has its own watchdog.
  */

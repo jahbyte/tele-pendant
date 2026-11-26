@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import {
+  MIN_JOG_PULSE_MS,
   cellPulsesDeadman,
   cellRequiresControlLease,
   cellUsesCommandHoldWatchdog,
@@ -67,6 +68,7 @@ type Hold = {
   cellId: string;
   direction: 'a' | 'b' | null;
   gen: number;
+  pressedAt: number;
 };
 
 function holdKey(cellId: string, direction?: 'a' | 'b' | null): string {
@@ -233,6 +235,11 @@ export function OperatorScreen({ token }: { token: string }) {
   const socketRef = useRef<Socket | null>(null);
   const inflight = useRef(new Set<string>());
   const releaseWaiting = useRef(new Map<string, 'a' | 'b' | null>());
+  const releaseAborted = useRef(new Set<string>());
+  const armedAt = useRef(new Map<string, number>());
+  const minPulseTimers = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  );
   const targets = useRef(
     new Map<
       string,
@@ -382,9 +389,20 @@ export function OperatorScreen({ token }: { token: string }) {
     [layoutQuery.data?.cells],
   );
 
+  const clearMinPulseTimer = useCallback((key: string) => {
+    const timer = minPulseTimers.current.get(key);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      minPulseTimers.current.delete(key);
+    }
+  }, []);
+
   const finishMotionRelease = useCallback(
     (key: string, cellId: string, direction?: 'a' | 'b' | null) => {
+      clearMinPulseTimer(key);
       releaseWaiting.current.delete(key);
+      releaseAborted.current.delete(key);
+      armedAt.current.delete(key);
       if (!leaseStillHeld()) releaseDeadman();
       const cell = layoutQuery.data?.cells.find((row) => row.id === cellId);
       if (cell?.style === 'enable') {
@@ -402,7 +420,32 @@ export function OperatorScreen({ token }: { token: string }) {
       }
       void dropMotionCoil(cellId, direction);
     },
-    [dropMotionCoil, layoutQuery.data?.cells, leaseStillHeld, releaseDeadman],
+    [
+      clearMinPulseTimer,
+      dropMotionCoil,
+      layoutQuery.data?.cells,
+      leaseStillHeld,
+      releaseDeadman,
+    ],
+  );
+
+  const scheduleMinPulseRelease = useCallback(
+    (
+      key: string,
+      cellId: string,
+      direction: 'a' | 'b' | null,
+      armedAtMs: number,
+    ) => {
+      clearMinPulseTimer(key);
+      const remain = Math.max(0, MIN_JOG_PULSE_MS - (Date.now() - armedAtMs));
+      releaseWaiting.current.set(key, direction);
+      const timer = setTimeout(() => {
+        minPulseTimers.current.delete(key);
+        finishMotionRelease(key, cellId, direction);
+      }, remain);
+      minPulseTimers.current.set(key, timer);
+    },
+    [clearMinPulseTimer, finishMotionRelease],
   );
 
   // Pulse deadman while any jog is held. Enable can stay down beside it.
@@ -478,8 +521,12 @@ export function OperatorScreen({ token }: { token: string }) {
         cellId: cell.id,
         direction: direction ?? null,
         gen: pressGen,
+        pressedAt: Date.now(),
       });
       releaseWaiting.current.delete(key);
+      releaseAborted.current.delete(key);
+      clearMinPulseTimer(key);
+      armedAt.current.delete(key);
       bumpHolds();
       void hapticHoldStart();
     }
@@ -492,28 +539,39 @@ export function OperatorScreen({ token }: { token: string }) {
       const held = holdsRef.current.get(key);
       return Boolean(held && held.gen === pressGen);
     };
+    const wantsTapPulse = () => releaseWaiting.current.has(key);
+    const wasAborted = () => releaseAborted.current.has(key);
     const activateBody = {
       value: true,
       ...(speed ? { speed } : {}),
       ...(direction ? { direction } : {}),
     };
     try {
-      // Await deadman ack before HTTP activate (Wi-Fi race). Quick taps that
-      // release during the wait still activate, then finishMotionRelease drops.
+      // Await deadman ack before HTTP activate (Wi-Fi race). Short taps set
+      // releaseWaiting and still complete a min coil pulse below.
       if (cellPulsesDeadman(cell)) {
         await ensureDeadman();
       }
+      if (wasAborted()) {
+        finishMotionRelease(key, cell.id, direction ?? null);
+        return;
+      }
       const maxAttempts = cellPulsesDeadman(cell) ? 4 : 1;
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (wasAborted()) {
+          finishMotionRelease(key, cell.id, direction ?? null);
+          return;
+        }
         try {
           await apiPost(`/hmi/cells/${cell.id}/activate`, activateBody, token);
           break;
         } catch (err) {
-          if (
-            !isMotionBlockedError(err) ||
-            !stillHeld() ||
-            attempt >= maxAttempts
-          ) {
+          const keepTrying =
+            isMotionBlockedError(err) &&
+            (stillHeld() || wantsTapPulse()) &&
+            !wasAborted() &&
+            attempt < maxAttempts;
+          if (!keepTrying) {
             throw err;
           }
           await ensureDeadman();
@@ -530,19 +588,29 @@ export function OperatorScreen({ token }: { token: string }) {
           terror,
         ),
       );
+      clearMinPulseTimer(key);
+      releaseWaiting.current.delete(key);
+      releaseAborted.current.delete(key);
+      armedAt.current.delete(key);
       if (stillHeld()) {
         holdsRef.current.delete(key);
         bumpHolds();
         if (cellPulsesDeadman(cell) && !leaseStillHeld()) releaseDeadman();
+      } else if (cellPulsesDeadman(cell) && !leaseStillHeld()) {
+        releaseDeadman();
       }
-      releaseWaiting.current.delete(key);
       return;
     } finally {
       inflight.current.delete(key);
     }
-    if (holdToRun && releaseWaiting.current.has(key)) {
-      const waitingDirection = releaseWaiting.current.get(key);
-      finishMotionRelease(key, cell.id, waitingDirection);
+    const activatedAt = Date.now();
+    if (holdToRun) armedAt.current.set(key, activatedAt);
+    if (holdToRun && (wantsTapPulse() || wasAborted() || !stillHeld())) {
+      if (wasAborted()) {
+        finishMotionRelease(key, cell.id, direction ?? null);
+        return;
+      }
+      scheduleMinPulseRelease(key, cell.id, direction ?? null, activatedAt);
       return;
     }
     const held = holdsRef.current.get(key);
@@ -558,6 +626,7 @@ export function OperatorScreen({ token }: { token: string }) {
       const key = holdKey(cell.id, direction);
       const held = holdsRef.current.get(key);
       if (!held) return;
+      const pressAgeMs = Date.now() - held.pressedAt;
       holdsRef.current.delete(key);
       bumpHolds();
       if (cell.style === 'enable') {
@@ -568,17 +637,50 @@ export function OperatorScreen({ token }: { token: string }) {
           if (!other || !cellPulsesDeadman(other)) continue;
           holdsRef.current.delete(otherKey);
           if (inflight.current.has(otherKey)) {
-            releaseWaiting.current.set(otherKey, hold.direction);
+            const otherAge = Date.now() - hold.pressedAt;
+            if (otherAge <= MIN_JOG_PULSE_MS) {
+              releaseWaiting.current.set(otherKey, hold.direction);
+            } else {
+              releaseAborted.current.add(otherKey);
+            }
+            continue;
+          }
+          const otherArmed = armedAt.current.get(otherKey);
+          if (
+            otherArmed !== undefined &&
+            Date.now() - otherArmed < MIN_JOG_PULSE_MS
+          ) {
+            scheduleMinPulseRelease(
+              otherKey,
+              other.id,
+              hold.direction,
+              otherArmed,
+            );
             continue;
           }
           finishMotionRelease(otherKey, other.id, hold.direction);
         }
       }
+      const releaseDir = direction ?? held.direction;
       if (inflight.current.has(key)) {
-        releaseWaiting.current.set(key, direction ?? held.direction);
+        if (pressAgeMs <= MIN_JOG_PULSE_MS) {
+          releaseWaiting.current.set(key, releaseDir);
+        } else {
+          releaseAborted.current.add(key);
+          if (!leaseStillHeld()) releaseDeadman();
+        }
         return;
       }
-      finishMotionRelease(key, cell.id, direction ?? held.direction);
+      const armedAtMs = armedAt.current.get(key);
+      if (
+        cellPulsesDeadman(cell) &&
+        armedAtMs !== undefined &&
+        Date.now() - armedAtMs < MIN_JOG_PULSE_MS
+      ) {
+        scheduleMinPulseRelease(key, cell.id, releaseDir, armedAtMs);
+        return;
+      }
+      finishMotionRelease(key, cell.id, releaseDir);
     };
     // Header mic can take the finger while Enable stays asserted for Listen.
     if (cell.style === 'enable') {
@@ -618,6 +720,11 @@ export function OperatorScreen({ token }: { token: string }) {
           holdsRef.current.set(holdKey(hold.cellId, hold.direction), hold);
         }
         releaseWaiting.current.clear();
+        releaseAborted.current.clear();
+        for (const key of minPulseTimers.current.keys()) {
+          clearMinPulseTimer(key);
+        }
+        armedAt.current.clear();
         bumpHolds();
         if (!keepEnable) {
           releaseDeadman();
@@ -650,7 +757,13 @@ export function OperatorScreen({ token }: { token: string }) {
       }
     });
     return () => sub.remove();
-  }, [bumpHolds, layoutQuery.data?.cells, releaseDeadman, token]);
+  }, [
+    bumpHolds,
+    clearMinPulseTimer,
+    layoutQuery.data?.cells,
+    releaseDeadman,
+    token,
+  ]);
 
   const resetEStop = async () => {
     try {
