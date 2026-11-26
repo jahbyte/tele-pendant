@@ -634,6 +634,28 @@ describe('SafetyStateService', () => {
     expect(driver.writeCoil).not.toHaveBeenCalled();
   });
 
+  it('forces deadman coil off while idle so orphan asserts cannot stick', async () => {
+    driver.writeCoil.mockClear();
+    expect(service.snapshot().deadmanActive).toBe(false);
+    await service.tick();
+    // DEMO_CRANE_MAP.coils.deadman is 10
+    expect(driver.writeCoil).toHaveBeenCalledWith(10, false);
+
+    // Non-Error reject on idle enforce is swallowed and retried next tick.
+    driver.writeCoil.mockRejectedValueOnce('down');
+    await service.tick();
+    driver.writeCoil.mockResolvedValue(undefined);
+  });
+
+  it('keeps forcing deadman off on every e-stop tick', async () => {
+    driver.readCoils.mockResolvedValue([true]);
+    await service.tick();
+    driver.writeCoil.mockClear();
+    // Already in e_stop — enterMode is a no-op, but orphan clear must still run.
+    await service.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(10, false);
+  });
+
   it('enters e_stop when coil is high and is idempotent', async () => {
     driver.readCoils.mockResolvedValue([true]);
     const snap = await service.tick();
@@ -902,6 +924,12 @@ describe('SafetyStateService', () => {
     expect(driver.writeRegister).toHaveBeenCalled();
     expect(driver.writeCoil).toHaveBeenCalledWith(expect.any(Number), true);
     expect(snap.lastHeartbeatAt).not.toBeNull();
+
+    // Second tick: coil already high — enforce off no-ops while hold is live.
+    driver.writeCoil.mockClear();
+    await service.tick();
+    expect(driver.writeCoil).not.toHaveBeenCalledWith(10, false);
+    expect(service.snapshot().deadmanActive).toBe(true);
   });
 
   it('expires deadman and clears motion coils', async () => {
@@ -1064,7 +1092,10 @@ describe('SafetyStateService', () => {
     driver.writeCoil.mockRejectedValueOnce(new Error('busy'));
     service.releaseCommandHolds({ userId: 'u1', addresses: [28] });
     await new Promise<void>((resolve) => setImmediate(resolve));
-    driver.writeCoil.mockRejectedValueOnce('down');
+    // Idle deadman enforce writeCoil runs first; reject the command-hold write.
+    driver.writeCoil
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce('down');
     const priv = service as unknown as { pendingCommandDrop: Set<number> };
     priv.pendingCommandDrop.add(28);
     await service.tick();

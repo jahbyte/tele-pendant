@@ -871,6 +871,7 @@ export class HmiService {
   /**
    * Raw coil writes use the same rules as a pendant press.
    * Motion needs control, Enable, and deadman. Clearing e-stop needs the reset PIN.
+   * Deadman ON is refused — only a live pulse hold may assert it.
    */
   async writeGuardedCoil(
     address: number,
@@ -927,6 +928,17 @@ export class HmiService {
       });
       return { ok: true };
     }
+    // Deadman is pulse-hold only — raw ON would stick with nobody holding.
+    if (await this.isDeadmanCoilAddress(address)) {
+      if (value) {
+        throw new ForbiddenException(
+          'Deadman can only be asserted by a live pulse hold',
+        );
+      }
+      await this.plcService.writeCoil(address, false);
+      await this.safetyState.releaseDeadman({ force: true });
+      return { ok: true };
+    }
     // Raw address with no matching cell: still refuse motion coils without gates.
     if (value && (await this.registerIsMotionCoil({ kind: 'coil', address }))) {
       if (!this.safetyState.canIssueMotion(opts.userId, opts.clientId)) {
@@ -952,6 +964,22 @@ export class HmiService {
     return bound?.kind === 'coil' && bound.address === address;
   }
 
+  private async isDeadmanCoilAddress(address: number): Promise<boolean> {
+    const named = await this.registers.findOneBy({ name: 'coil.deadman' });
+    if (
+      named?.name === 'coil.deadman' &&
+      named.kind === 'coil' &&
+      named.address === address
+    ) {
+      return true;
+    }
+    const roles = await this.safetyState.getRoles();
+    if (!roles.deadmanRegisterId) return false;
+    const bound = await this.registers.findOneBy({
+      id: roles.deadmanRegisterId,
+    });
+    return bound?.kind === 'coil' && bound.address === address;
+  }
 
   /** FEAT-A2: write holding.speedPct for slow/fast jog (0 clears). */
   private async writeJogSpeedPct(

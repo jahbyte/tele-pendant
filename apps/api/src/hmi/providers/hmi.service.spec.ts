@@ -1418,6 +1418,69 @@ describe('HmiService', () => {
     expect(plcService.writeCoil).toHaveBeenCalledWith(99, true);
   });
 
+  it('blocks raw deadman ON and clears OFF via release', async () => {
+    cells.find.mockResolvedValue([]);
+    safetyState.getRoles.mockResolvedValue({
+      eStopRegisterId: null,
+      deadmanRegisterId: 'dead-id',
+      heartbeatRegisterId: null,
+      safeStateRegisterId: null,
+    });
+    registers.findOneBy.mockImplementation(
+      async (q: { name?: string; id?: string }) => {
+        if (q.name === 'coil.eStop') return null;
+        if (q.name === 'coil.deadman') {
+          return {
+            id: 'dead-id',
+            kind: 'coil',
+            address: 10,
+            name: 'coil.deadman',
+          };
+        }
+        if (q.id === 'dead-id') {
+          return {
+            id: 'dead-id',
+            kind: 'coil',
+            address: 10,
+            name: 'coil.deadman',
+          };
+        }
+        return null;
+      },
+    );
+    await expect(
+      service.writeGuardedCoil(10, true, { userId: 'u1', clientId: 'c1' }),
+    ).rejects.toThrow(/Deadman can only be asserted by a live pulse hold/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+    expect(safetyState.releaseDeadman).not.toHaveBeenCalled();
+
+    await expect(
+      service.writeGuardedCoil(10, false, { userId: 'u1', clientId: 'c1' }),
+    ).resolves.toEqual({ ok: true });
+    expect(plcService.writeCoil).toHaveBeenCalledWith(10, false);
+    expect(safetyState.releaseDeadman).toHaveBeenCalledWith({ force: true });
+
+    // Role-bound deadman without the demo name still gated.
+    registers.findOneBy.mockImplementation(
+      async (q: { name?: string; id?: string }) => {
+        if (q.name === 'coil.eStop' || q.name === 'coil.deadman') return null;
+        if (q.id === 'dead-id') {
+          return {
+            id: 'dead-id',
+            kind: 'coil',
+            address: 55,
+            name: 'coil.customDead',
+          };
+        }
+        return null;
+      },
+    );
+    plcService.writeCoil.mockClear();
+    await expect(
+      service.writeGuardedCoil(55, true, { userId: 'u1' }),
+    ).rejects.toThrow(/Deadman can only be asserted/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+  });
 
   it('blocks raw writeGuardedCoil to a motion address with no matching cell', async () => {
     // Unfiltered find → no owner cell; isMotion find → coil 26 is still motion.

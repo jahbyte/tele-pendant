@@ -679,6 +679,29 @@ export class SafetyStateService implements OnModuleInit {
   }
 
   /**
+   * Force PLC deadman low. Idle ticks no-op while a live hold is active; e-stop
+   * passes force so orphan raw asserts cannot stick while latched.
+   */
+  private async enforceDeadmanCoilOff(opts?: {
+    force?: boolean;
+  }): Promise<void> {
+    if (!opts?.force && this.deadmanActive) return;
+    const driver = this.plcService.getDriver();
+    try {
+      const deadman = await this.roleAddress(
+        'deadmanRegisterId',
+        'coil.deadman',
+        DEMO_CRANE_MAP.coils.deadman,
+      );
+      await driver.writeCoil(deadman, false);
+      this.deadmanCoilHigh = false;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Deadman off enforce failed (will retry): ${message}`);
+    }
+  }
+
+  /**
    * Motion only for the exclusive control holder who also holds deadman
    * (TP-37 + FEAT-A5).
    */
@@ -754,6 +777,8 @@ export class SafetyStateService implements OnModuleInit {
       await this.clearOutputsAfterRestart();
       if (coilHigh) {
         await this.enterMode('e_stop', 'E-stop coil asserted');
+        // Keep deadman low while e-stop is asserted (clears orphan raw asserts).
+        await this.enforceDeadmanCoilOff({ force: true });
         return this.snapshot();
       }
       if (this.eStopActive) {
@@ -761,6 +786,7 @@ export class SafetyStateService implements OnModuleInit {
         if (this.mode !== 'e_stop') {
           await this.enterMode('e_stop', 'Software e-stop still latched');
         }
+        await this.enforceDeadmanCoilOff({ force: true });
         return this.snapshot();
       }
 
@@ -809,6 +835,10 @@ export class SafetyStateService implements OnModuleInit {
         );
         await driver.writeCoil(deadman, true);
         this.deadmanCoilHigh = true;
+      } else {
+        // Idle (or hold already asserted): force PLC low when not holding so
+        // orphan raw asserts cannot stick. No-ops while deadmanActive.
+        await this.enforceDeadmanCoilOff();
       }
 
       // Enable pulse watchdog: lost release / offline mid-hold drops Enable + jogs.
