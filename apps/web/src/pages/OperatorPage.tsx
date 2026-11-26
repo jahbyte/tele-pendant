@@ -27,7 +27,7 @@ import {
 import { useControlLease } from '../lib/control-lease';
 import { applyLiveTagsState, shouldApplyLiveTags } from '../lib/live-tags';
 import { motionDebug } from '../lib/motion-debug';
-import { getRealtimeSocket } from '../lib/realtime';
+import { emitDeadmanPulseAck, getRealtimeSocket } from '../lib/realtime';
 import { HelpTip } from '../lib/tour';
 import { PageSpinner } from '@/components/page-spinner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -309,6 +309,21 @@ export function OperatorPage() {
     };
   }, [applyLiveTags]);
 
+  const pulseDeadman = useCallback(() => {
+    // Fire-and-forget for the 400ms hold interval (no need to block UI).
+    getRealtimeSocket().emit('deadman.pulse');
+  }, []);
+
+  /** Wait for server ack before the first motion activate (Wi-Fi race). */
+  const ensureDeadman = useCallback(async () => {
+    const snap = await emitDeadmanPulseAck(getRealtimeSocket());
+    return Boolean(snap?.deadmanActive);
+  }, []);
+
+  const releaseDeadman = useCallback(() => {
+    getRealtimeSocket().emit('deadman.release');
+  }, []);
+
   // Match the local working hold path: WS deadman pulse only (no HTTP flood).
   // Only motion/jog holds refresh deadman — Enable/PB holds must not.
   useEffect(() => {
@@ -331,12 +346,12 @@ export function OperatorPage() {
         transport: socket.io?.engine?.transport?.name,
         msSinceLastTag: Date.now() - (lastWsTagAt.current || Date.now()),
       });
-      socket.emit('deadman.pulse');
+      pulseDeadman();
     };
     pulse();
     const id = window.setInterval(pulse, 400);
     return () => window.clearInterval(id);
-  }, [heldVersion, layoutQuery.data?.cells]);
+  }, [heldVersion, layoutQuery.data?.cells, pulseDeadman]);
 
   // Enable has its own pulse watchdog so a lost activate(false) cannot leave
   // the coil ON. Listen keeps Enable in holdsRef, so pulses continue there too.
@@ -395,15 +410,6 @@ export function OperatorPage() {
       void queryClient.invalidateQueries({ queryKey: ['hmi-layout'] });
     },
   });
-
-  const pulseDeadman = useCallback(() => {
-    // WS only — HTTP pulse/release doubled Modbus coil drops with the WS path.
-    getRealtimeSocket().emit('deadman.pulse');
-  }, []);
-
-  const releaseDeadman = useCallback(() => {
-    getRealtimeSocket().emit('deadman.release');
-  }, []);
 
   const grid = useMemo(() => {
     const layout = layoutQuery.data;
@@ -508,22 +514,51 @@ export function OperatorPage() {
         pulses: cellPulsesDeadman(cell),
       });
       bumpHolds();
-      if (cellPulsesDeadman(cell)) pulseDeadman();
     }
     const speed =
       cell.isMotion && (cell.variableSpeed ?? true)
         ? jogSpeedRef.current
         : undefined;
     const t0 = Date.now();
-    try {
-      await activate.mutateAsync({
+    const stillHeld = () => {
+      const held = holdsRef.current.get(key);
+      return Boolean(held && held.gen === pressGen);
+    };
+    const activateTrue = () =>
+      activate.mutateAsync({
         id: cell.id,
         value: true,
         speed,
         ...(direction ? { direction } : {}),
       });
-      const held = holdsRef.current.get(key);
-      if (holdToRun && (!held || held.gen !== pressGen)) {
+    try {
+      // Await deadman ack before HTTP activate so WS lag cannot refuse the jog.
+      // Still activate after a quick tap that released during the ack wait —
+      // then dropCoil below clears the coil.
+      if (cellPulsesDeadman(cell)) {
+        await ensureDeadman();
+      }
+      const maxAttempts = cellPulsesDeadman(cell) ? 4 : 1;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await activateTrue();
+          break;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const motionBlocked = /motion blocked/i.test(msg);
+          motionDebug('hold.activate-true.fail', {
+            cellId: cell.id,
+            ms: Date.now() - t0,
+            attempt,
+            message: msg,
+          });
+          if (!motionBlocked || !stillHeld() || attempt >= maxAttempts) {
+            throw err;
+          }
+          await ensureDeadman();
+        }
+      }
+      if (holdToRun && !stillHeld()) {
         // Released while activate(true) was in flight — drop the coil.
         dropCoil(cell, direction);
         return;
@@ -542,8 +577,7 @@ export function OperatorPage() {
           message: err instanceof Error ? err.message : String(err),
         });
       }
-      const held = holdsRef.current.get(key);
-      if (held && held.gen === pressGen) {
+      if (stillHeld()) {
         holdsRef.current.delete(key);
         bumpHolds();
         if (cellPulsesDeadman(cell) && !motionStillHeld()) releaseDeadman();

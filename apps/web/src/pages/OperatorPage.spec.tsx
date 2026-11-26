@@ -29,10 +29,15 @@ const socket = {
   },
 };
 
-vi.mock('../lib/realtime', () => ({
-  getRealtimeSocket: () => socket,
-  resetRealtimeSocket: vi.fn(),
-}));
+vi.mock('../lib/realtime', async () => {
+  const actual =
+    await vi.importActual<typeof import('../lib/realtime')>('../lib/realtime');
+  return {
+    ...actual,
+    getRealtimeSocket: () => socket,
+    resetRealtimeSocket: vi.fn(),
+  };
+});
 
 const layout = {
   matrix: { rows: 1, cols: 3 },
@@ -233,6 +238,14 @@ describe('OperatorPage', () => {
     socket.io.on.mockClear();
     socket.io.off.mockClear();
     localStorage.setItem('user', JSON.stringify({ id: 'u1', email: 'op@x' }));
+    // Ack deadman.pulse so ensureDeadman does not wait on the 1.5s timeout.
+    socket.emit.mockImplementation((event: string, ...args: unknown[]) => {
+      const cb = args.find((a) => typeof a === 'function') as
+        ((snap: { deadmanActive: boolean }) => void) | undefined;
+      if (event === 'deadman.pulse' && cb) {
+        cb({ deadmanActive: true });
+      }
+    });
     socket.on.mockImplementation(
       (event: string, handler: (p: unknown) => void) => {
         if (event === 'tags.update') {
@@ -754,7 +767,9 @@ describe('OperatorPage', () => {
     fireEvent.pointerUp(hoist);
     fireEvent.pointerLeave(hoist);
     fireEvent.pointerCancel(hoist);
-    expect(socket.emit).toHaveBeenCalledWith('deadman.pulse');
+    expect(socket.emit.mock.calls.some((c) => c[0] === 'deadman.pulse')).toBe(
+      true,
+    );
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'STOP' }));
     fireEvent.pointerUp(screen.getByRole('button', { name: 'STOP' }));
@@ -796,6 +811,50 @@ describe('OperatorPage', () => {
     fireEvent.pointerDown(hoist);
     fireEvent.pointerMove(stop, { clientX: 150, clientY: 150 });
     window.dispatchEvent(new Event('pagehide'));
+  });
+
+  it('retries Motion blocked after deadman ack lands on a slow WS path', async () => {
+    let activateCalls = 0;
+    mockPostWithControl(async (path) => {
+      if (String(path).includes('/hmi/cells/')) {
+        activateCalls += 1;
+        if (activateCalls === 1) {
+          throw new Error(
+            'Motion blocked: claim control, hold deadman, and ensure normal safety mode',
+          );
+        }
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    await waitFor(() => expect(activateCalls).toBeGreaterThanOrEqual(2));
+    fireEvent.pointerUp(hoist);
+  });
+
+  it('stops Motion blocked retries when the finger is released mid-retry', async () => {
+    let activateCalls = 0;
+    mockPostWithControl(async (path) => {
+      if (String(path).includes('/hmi/cells/')) {
+        activateCalls += 1;
+        throw new Error(
+          'Motion blocked: claim control, hold deadman, and ensure normal safety mode',
+        );
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    const hoist = await screen.findByRole('button', { name: 'Hoist Up' });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hoist);
+    await waitFor(() => expect(activateCalls).toBeGreaterThanOrEqual(1));
+    fireEvent.pointerUp(hoist);
+    await waitFor(() =>
+      expect(screen.getByText(/Motion blocked/i)).toBeInTheDocument(),
+    );
   });
 
   it('handles activate failure and logout', async () => {

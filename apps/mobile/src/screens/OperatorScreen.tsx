@@ -40,6 +40,7 @@ import { operatorApiError } from '../api-errors';
 import { apiGet, apiPost, getApiBase } from '../api';
 import { getControlClientId } from '../control-client-id';
 import { useControlLease } from '../control-lease';
+import { emitDeadmanPulseAck } from '../deadman-pulse';
 import { deferEnableRelease, voiceKeepsEnable } from '../enable-voice-bridge';
 import type { Cell, ControlLease, Layout } from '../types';
 import { useLocale } from '../locale';
@@ -337,9 +338,10 @@ export function OperatorScreen({ token }: { token: string }) {
     queryFn: () => apiGet<Layout>('/hmi/layout', token),
   });
 
-  const pulseDeadman = useCallback(async () => {
-    // WS only — HTTP pulse/release doubled Modbus coil drops with the WS path.
-    socketRef.current?.emit('deadman.pulse');
+  /** Wait for server ack before the first motion activate (Wi-Fi race). */
+  const ensureDeadman = useCallback(async () => {
+    const snap = await emitDeadmanPulseAck(socketRef.current);
+    return Boolean(snap?.deadmanActive);
   }, []);
 
   const releaseDeadman = useCallback(() => {
@@ -486,19 +488,37 @@ export function OperatorScreen({ token }: { token: string }) {
       cell.isMotion && (cell.variableSpeed ?? true)
         ? jogSpeedRef.current
         : undefined;
+    const stillHeld = () => {
+      const held = holdsRef.current.get(key);
+      return Boolean(held && held.gen === pressGen);
+    };
+    const activateBody = {
+      value: true,
+      ...(speed ? { speed } : {}),
+      ...(direction ? { direction } : {}),
+    };
     try {
+      // Await deadman ack before HTTP activate (Wi-Fi race). Quick taps that
+      // release during the wait still activate, then finishMotionRelease drops.
       if (cellPulsesDeadman(cell)) {
-        await pulseDeadman();
+        await ensureDeadman();
       }
-      await apiPost(
-        `/hmi/cells/${cell.id}/activate`,
-        {
-          value: true,
-          ...(speed ? { speed } : {}),
-          ...(direction ? { direction } : {}),
-        },
-        token,
-      );
+      const maxAttempts = cellPulsesDeadman(cell) ? 4 : 1;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await apiPost(`/hmi/cells/${cell.id}/activate`, activateBody, token);
+          break;
+        } catch (err) {
+          if (
+            !isMotionBlockedError(err) ||
+            !stillHeld() ||
+            attempt >= maxAttempts
+          ) {
+            throw err;
+          }
+          await ensureDeadman();
+        }
+      }
     } catch (err) {
       if (needsLease && isMotionBlockedError(err)) {
         void hapticMotionBlocked();
@@ -510,8 +530,7 @@ export function OperatorScreen({ token }: { token: string }) {
           terror,
         ),
       );
-      const held = holdsRef.current.get(key);
-      if (held && held.gen === pressGen) {
+      if (stillHeld()) {
         holdsRef.current.delete(key);
         bumpHolds();
         if (cellPulsesDeadman(cell) && !leaseStillHeld()) releaseDeadman();

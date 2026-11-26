@@ -67,4 +67,38 @@ describe('getRealtimeSocket', () => {
       }),
     );
   });
+
+  it('waits for deadman.pulse ack and times out when none arrives', async () => {
+    vi.useFakeTimers();
+    const { emitDeadmanPulseAck } = await import('./realtime');
+    const emit = vi.fn((event: string, cb?: (snap: unknown) => void) => {
+      if (event === 'deadman.pulse' && cb) {
+        cb({ deadmanActive: true });
+        cb({ deadmanActive: true }); // second ack ignored after settle
+      }
+    });
+    await expect(emitDeadmanPulseAck({ emit } as never, 1000)).resolves.toEqual(
+      { deadmanActive: true },
+    );
+
+    const nullAck = vi.fn((event: string, cb?: (snap: unknown) => void) => {
+      if (event === 'deadman.pulse' && cb) cb(undefined);
+    });
+    await expect(
+      emitDeadmanPulseAck({ emit: nullAck } as never, 1000),
+    ).resolves.toBeNull();
+
+    const hang = vi.fn();
+    const pending = emitDeadmanPulseAck({ emit: hang } as never, 500);
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(pending).resolves.toBeNull();
+
+    const boom = vi.fn(() => {
+      throw new Error('emit failed');
+    });
+    await expect(
+      emitDeadmanPulseAck({ emit: boom } as never, 500),
+    ).resolves.toBeNull();
+    vi.useRealTimers();
+  });
 });
