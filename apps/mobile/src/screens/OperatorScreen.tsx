@@ -21,6 +21,7 @@ import {
   cellRequiresControlLease,
   cellUsesCommandHoldWatchdog,
   cellUsesHoldToRun,
+  clampPercentOrigin,
   containedImageRect,
   formatOverlay,
   isClusterMetricRegister,
@@ -36,6 +37,11 @@ import {
   tagValueForRegister,
   type TagSnapshot,
 } from '@tele-pendant/shared';
+
+/** Min placed-button chip on the plant stage (matches min-h-11 / min-w-11). */
+const PLANT_BUTTON_CHIP = 44;
+/** Seed overlay chips (label + value). */
+const PLANT_OVERLAY_CHIP = { width: 56, height: 28 };
 import { io, Socket } from 'socket.io-client';
 import { operatorApiError } from '../api-errors';
 import { apiGet, apiPost, getApiBase } from '../api';
@@ -1631,40 +1637,13 @@ export function OperatorScreen({ token }: { token: string }) {
         <HelpTip id="tour.operator.graphic" className="min-h-0 flex-1">
           <View
             className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10"
-            onLayout={(event) => {
-              const { width, height } = event.nativeEvent.layout;
-              setPlantFrame((prev) =>
-                Math.abs(prev.width - width) < 1 &&
-                Math.abs(prev.height - height) < 1
-                  ? prev
-                  : { width, height },
-              );
-            }}
             style={{
               flex: 1,
               minHeight: 64,
               backgroundColor: solidBackground || '#07090c',
             }}
           >
-            {useCustomGraphic ? (
-              <PlantImage
-                uri={imageUrl}
-                onSize={onPlantSize}
-                onError={onPlantError}
-              />
-            ) : hasPicture ? (
-              <View className="absolute inset-0 items-center justify-center px-3">
-                <Text className="text-center text-xs text-white/80">
-                  The plant picture did not load.
-                </Text>
-              </View>
-            ) : (
-              <View
-                className="absolute inset-0"
-                style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}
-              />
-            )}
-            <View className="z-10 flex-row items-center justify-between px-2.5 pb-0.5 pt-1.5">
+            <View className="z-20 flex-row items-center justify-between px-2.5 pb-0.5 pt-1.5">
               <Text
                 className="flex-1 text-[9px] font-medium uppercase text-white/70"
                 style={{ letterSpacing: 1.4 }}
@@ -1692,90 +1671,147 @@ export function OperatorScreen({ token }: { token: string }) {
                 </Text>
               </View>
             </View>
-            {!hasPicture ? (
-              <Text className="px-3 py-4 text-sm text-muted-foreground">
-                no picture
-              </Text>
-            ) : null}
-            {showOverlays ? (
-              <View
-                className={`absolute z-[10] ${
-                  useCustomGraphic && drawnImage.width > 0
-                    ? ''
-                    : 'inset-x-0 top-7 bottom-2'
-                }`}
-                pointerEvents="box-none"
-                style={
-                  useCustomGraphic && drawnImage.width > 0
-                    ? {
-                        left: drawnImage.left,
-                        top: drawnImage.top,
-                        width: drawnImage.width,
-                        height: drawnImage.height,
-                      }
-                    : undefined
-                }
-              >
-                {(layoutQuery.data?.overlays ?? [])
-                  .filter(
-                    (o) =>
-                      isPendantScreen ||
-                      !isClusterMetricRegister(o.register?.name),
-                  )
-                  .map((o) => (
-                    <View
-                      key={o.id}
-                      className="absolute min-w-0 items-center rounded border border-white/18 bg-black/70 px-1 py-px"
-                      style={{
-                        left: `${o.xPct}%`,
-                        top: `${o.yPct}%`,
-                        maxWidth: '42%',
-                        ...(isPendantScreen
-                          ? {}
-                          : {
-                              transform: [
-                                { translateX: -28 },
-                                { translateY: -12 },
-                              ],
-                            }),
-                      }}
-                    >
-                      <Text className="text-[7px] uppercase leading-none text-white/55">
-                        {o.label}
-                      </Text>
-                      <Text className="font-mono text-[10px] font-semibold leading-none text-white">
-                        {formatOverlay(
-                          o.format,
-                          tagValueForRegister(tags, o.register?.name),
-                        )}
-                      </Text>
-                    </View>
-                  ))}
-                {placedCells.map((cell) => (
-                  <Pressable
-                    key={cell.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={cell.label}
-                    className="absolute min-h-11 min-w-11 items-center justify-center rounded-md border border-white/30 bg-black/80 px-2"
-                    style={{
-                      left: `${cell.xPct}%`,
-                      top: `${cell.yPct}%`,
-                      maxWidth: '42%',
-                    }}
-                    onPressIn={() => {
-                      void pressCell(cell);
-                    }}
-                    onPressOut={() => {
-                      releaseCell(cell);
-                    }}
-                  >
-                    <Text className="text-xs font-semibold text-white">
-                      {cell.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
+            <View
+              className="relative min-h-0 flex-1 overflow-hidden"
+              onLayout={(event) => {
+                const { width, height } = event.nativeEvent.layout;
+                setPlantFrame((prev) =>
+                  Math.abs(prev.width - width) < 1 &&
+                  Math.abs(prev.height - height) < 1
+                    ? prev
+                    : { width, height },
+                );
+              }}
+            >
+              {useCustomGraphic ? (
+                <PlantImage
+                  uri={imageUrl}
+                  onSize={onPlantSize}
+                  onError={onPlantError}
+                />
+              ) : hasPicture ? (
+                <View className="absolute inset-0 items-center justify-center px-3">
+                  <Text className="text-center text-xs text-white/80">
+                    The plant picture did not load.
+                  </Text>
+                </View>
+              ) : (
+                <View
+                  className="absolute inset-0"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}
+                />
+              )}
+              {!hasPicture ? (
+                <Text className="px-3 py-4 text-sm text-muted-foreground">
+                  no picture
+                </Text>
+              ) : null}
+              {showOverlays ? (
+                <View
+                  className={`absolute z-[10] ${
+                    useCustomGraphic && drawnImage.width > 0 ? '' : 'inset-0'
+                  }`}
+                  pointerEvents="box-none"
+                  style={
+                    useCustomGraphic && drawnImage.width > 0
+                      ? {
+                          left: drawnImage.left,
+                          top: drawnImage.top,
+                          width: drawnImage.width,
+                          height: drawnImage.height,
+                        }
+                      : undefined
+                  }
+                >
+                  {(layoutQuery.data?.overlays ?? [])
+                    .filter(
+                      (o) =>
+                        isPendantScreen ||
+                        !isClusterMetricRegister(o.register?.name),
+                    )
+                    .map((o) => {
+                      const stageW =
+                        useCustomGraphic && drawnImage.width > 0
+                          ? drawnImage.width
+                          : plantFrame.width;
+                      const stageH =
+                        useCustomGraphic && drawnImage.height > 0
+                          ? drawnImage.height
+                          : plantFrame.height;
+                      const origin = clampPercentOrigin(
+                        o.xPct,
+                        o.yPct,
+                        stageW,
+                        stageH,
+                        PLANT_OVERLAY_CHIP.width,
+                        PLANT_OVERLAY_CHIP.height,
+                      );
+                      return (
+                        <View
+                          key={o.id}
+                          className="absolute min-w-0 items-center rounded border border-white/18 bg-black/70 px-1 py-px"
+                          style={{
+                            left: `${origin.leftPct}%`,
+                            top: `${origin.topPct}%`,
+                            maxWidth: '42%',
+                          }}
+                        >
+                          <Text className="text-[7px] uppercase leading-none text-white/55">
+                            {o.label}
+                          </Text>
+                          <Text className="font-mono text-[10px] font-semibold leading-none text-white">
+                            {formatOverlay(
+                              o.format,
+                              tagValueForRegister(tags, o.register?.name),
+                            )}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  {placedCells.map((cell) => {
+                    const stageW =
+                      useCustomGraphic && drawnImage.width > 0
+                        ? drawnImage.width
+                        : plantFrame.width;
+                    const stageH =
+                      useCustomGraphic && drawnImage.height > 0
+                        ? drawnImage.height
+                        : plantFrame.height;
+                    const origin = clampPercentOrigin(
+                      cell.xPct as number,
+                      cell.yPct as number,
+                      stageW,
+                      stageH,
+                      PLANT_BUTTON_CHIP,
+                      PLANT_BUTTON_CHIP,
+                    );
+                    return (
+                      <Pressable
+                        key={cell.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={cell.label}
+                        className="absolute min-h-11 min-w-11 items-center justify-center rounded-md border border-white/30 bg-black/80 px-2"
+                        style={{
+                          left: `${origin.leftPct}%`,
+                          top: `${origin.topPct}%`,
+                          maxWidth: '42%',
+                        }}
+                        onPressIn={() => {
+                          void pressCell(cell);
+                        }}
+                        onPressOut={() => {
+                          releaseCell(cell);
+                        }}
+                      >
+                        <Text className="text-xs font-semibold text-white">
+                          {cell.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
           </View>
         </HelpTip>
 

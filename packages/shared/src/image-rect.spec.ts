@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { containedImageRect, percentInRect } from './image-rect';
+import {
+  clampPercentOrigin,
+  containedImageRect,
+  percentInRect,
+  plantStageBelowChrome,
+} from './image-rect';
 
 describe('containedImageRect', () => {
   it('letterboxes a wide image', () => {
@@ -24,5 +29,29 @@ describe('containedImageRect', () => {
     expect(
       percentInRect(1, 1, { left: 0, top: 0, width: 0, height: 0 }),
     ).toEqual({ xPct: 0, yPct: 0 });
+  });
+
+  it('keeps an edge chip inside the plant stage', () => {
+    expect(clampPercentOrigin(95, 90, 200, 100, 44, 44)).toEqual({
+      leftPct: 78,
+      topPct: 56,
+    });
+    expect(clampPercentOrigin(0, 0, 200, 100, 44, 44)).toEqual({
+      leftPct: 0,
+      topPct: 0,
+    });
+    expect(clampPercentOrigin(50, 50, 0, 0, 44, 44)).toEqual({
+      leftPct: 50,
+      topPct: 50,
+    });
+  });
+
+  it('reserves the chrome band above the plant picture', () => {
+    expect(
+      plantStageBelowChrome({ left: 0, top: 0, width: 320, height: 200 }, 28),
+    ).toEqual({ left: 0, top: 28, width: 320, height: 172 });
+    expect(
+      plantStageBelowChrome({ left: 10, top: 5, width: 100, height: 20 }, 40),
+    ).toEqual({ left: 10, top: 45, width: 100, height: 0 });
   });
 });

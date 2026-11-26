@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { SvgUri } from 'react-native-svg';
+import { containedImageRect } from '@tele-pendant/shared';
 import { isSvgAsset, svgViewSize } from './plant-image';
 
 type Size = { width: number; height: number };
@@ -17,6 +18,7 @@ export function PlantImage({
 }) {
   const svg = isSvgAsset(uri);
   const [box, setBox] = useState({ width: 0, height: 0 });
+  const [natural, setNatural] = useState({ width: 0, height: 0 });
   const onSizeRef = useRef(onSize);
   const onErrorRef = useRef(onError);
   onSizeRef.current = onSize;
@@ -33,7 +35,10 @@ export function PlantImage({
       .then((xml) => {
         if (cancelled) return;
         const size = svgViewSize(xml);
-        if (size) onSizeRef.current?.(size);
+        if (size) {
+          setNatural(size);
+          onSizeRef.current?.(size);
+        }
       })
       .catch(() => {
         if (!cancelled) onErrorRef.current?.();
@@ -44,6 +49,15 @@ export function PlantImage({
   }, [svg, uri]);
 
   if (svg) {
+    const drawn =
+      box.width > 0 && box.height > 0 && natural.width > 0 && natural.height > 0
+        ? containedImageRect(
+            box.width,
+            box.height,
+            natural.width,
+            natural.height,
+          )
+        : null;
     return (
       <View
         style={StyleSheet.absoluteFill}
@@ -58,13 +72,23 @@ export function PlantImage({
           );
         }}
       >
-        {box.width > 0 && box.height > 0 ? (
-          <SvgUri
-            uri={uri}
-            width={box.width}
-            height={box.height}
-            onError={() => onErrorRef.current?.()}
-          />
+        {drawn ? (
+          <View
+            style={{
+              position: 'absolute',
+              left: drawn.left,
+              top: drawn.top,
+              width: drawn.width,
+              height: drawn.height,
+            }}
+          >
+            <SvgUri
+              uri={uri}
+              width={drawn.width}
+              height={drawn.height}
+              onError={() => onErrorRef.current?.()}
+            />
+          </View>
         ) : null}
       </View>
     );

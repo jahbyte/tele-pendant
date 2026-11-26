@@ -15,6 +15,7 @@ import {
   cellRequiresControlLease,
   cellUsesCommandHoldWatchdog,
   cellUsesHoldToRun,
+  clampPercentOrigin,
   containedImageRect,
   isOperatorStopCell,
   isOperatorScreenReady,
@@ -25,6 +26,11 @@ import {
   resolveMatrixCellUiState,
   type MatrixCellUiState,
 } from '@tele-pendant/shared';
+
+/** Min placed-button chip on the plant stage (matches .plant-placed-button). */
+const PLANT_BUTTON_CHIP = 44;
+/** Seed overlay chips (label + value). */
+const PLANT_OVERLAY_CHIP = { width: 56, height: 28 };
 import { useControlLease } from '../lib/control-lease';
 import { applyLiveTagsState, shouldApplyLiveTags } from '../lib/live-tags';
 import { motionDebug } from '../lib/motion-debug';
@@ -1418,22 +1424,11 @@ export function OperatorPage() {
           </HelpTip>
           <HelpTip id="tour.operator.graphic" className="operator-plant-slot">
             <div
-              ref={graphicRef}
               className="plant-graphic"
               data-feat="hmi-graphic"
               data-graphic-mode={useCustomGraphic ? 'asset' : 'mimic'}
               style={cssBackground ? { background: cssBackground } : undefined}
             >
-              {useCustomGraphic ? (
-                <img
-                  ref={plantImgRef}
-                  alt="Plant background"
-                  src={imageUrl}
-                  onError={() => setPhotoOk(false)}
-                />
-              ) : (
-                <p className="plant-empty">no picture</p>
-              )}
               <div className="plant-cluster-chrome">
                 <h2 className="plant-cluster-title">
                   {layout.background?.name ?? t('plantGraphic')}
@@ -1458,57 +1453,100 @@ export function OperatorPage() {
                   {mode}
                 </div>
               </div>
-              <div
-                className="plant-overlay-stage"
-                style={
-                  imageRect
-                    ? {
-                        left: imageRect.left,
-                        top: imageRect.top,
-                        width: imageRect.width,
-                        height: imageRect.height,
-                        right: 'auto',
-                        bottom: 'auto',
-                      }
-                    : undefined
-                }
-              >
-                {(layout.overlays ?? [])
-                  .filter((o) => !isClusterMetricRegister(o.register?.name))
-                  .map((o) => (
-                    <div
-                      key={o.id}
-                      className="plant-overlay"
-                      style={{ left: `${o.xPct}%`, top: `${o.yPct}%` }}
-                    >
-                      <span className="plant-overlay-label">{o.label}</span>
-                      <strong className="plant-overlay-value">
-                        {formatOverlay(
-                          o.format,
-                          tagValueForRegister(tags, o.register?.name),
-                        )}
-                      </strong>
-                    </div>
-                  ))}
-                {placedCells.map((cell) => (
-                  <Button
-                    key={cell.id}
-                    type="button"
-                    variant="secondary"
-                    className="plant-placed-button"
-                    style={{ left: `${cell.xPct}%`, top: `${cell.yPct}%` }}
-                    disabled={cellRequiresControlLease(cell) && !youHold}
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      void pressCell(cell);
-                    }}
-                    onPointerUp={() => releaseCell(cell)}
-                    onPointerCancel={() => releaseCell(cell)}
-                    aria-label={cell.label}
-                  >
-                    {cell.label}
-                  </Button>
-                ))}
+              <div ref={graphicRef} className="plant-picture">
+                {useCustomGraphic ? (
+                  <img
+                    ref={plantImgRef}
+                    alt="Plant background"
+                    src={imageUrl}
+                    onError={() => setPhotoOk(false)}
+                  />
+                ) : (
+                  <p className="plant-empty">no picture</p>
+                )}
+                <div
+                  className="plant-overlay-stage"
+                  style={
+                    imageRect
+                      ? {
+                          left: imageRect.left,
+                          top: imageRect.top,
+                          width: imageRect.width,
+                          height: imageRect.height,
+                          right: 'auto',
+                          bottom: 'auto',
+                        }
+                      : undefined
+                  }
+                >
+                  {(layout.overlays ?? [])
+                    .filter((o) => !isClusterMetricRegister(o.register?.name))
+                    .map((o) => {
+                      const stageW = imageRect?.width ?? 0;
+                      const stageH = imageRect?.height ?? 0;
+                      const origin = clampPercentOrigin(
+                        o.xPct,
+                        o.yPct,
+                        stageW,
+                        stageH,
+                        PLANT_OVERLAY_CHIP.width,
+                        PLANT_OVERLAY_CHIP.height,
+                      );
+                      return (
+                        <div
+                          key={o.id}
+                          className="plant-overlay"
+                          style={{
+                            left: `${origin.leftPct}%`,
+                            top: `${origin.topPct}%`,
+                          }}
+                        >
+                          <span className="plant-overlay-label">{o.label}</span>
+                          <strong className="plant-overlay-value">
+                            {formatOverlay(
+                              o.format,
+                              tagValueForRegister(tags, o.register?.name),
+                            )}
+                          </strong>
+                        </div>
+                      );
+                    })}
+                  {placedCells.map((cell) => {
+                    const stageW = imageRect?.width ?? 0;
+                    const stageH = imageRect?.height ?? 0;
+                    // isPlacedOnPicture already requires xPct/yPct.
+                    const origin = clampPercentOrigin(
+                      cell.xPct as number,
+                      cell.yPct as number,
+                      stageW,
+                      stageH,
+                      PLANT_BUTTON_CHIP,
+                      PLANT_BUTTON_CHIP,
+                    );
+                    return (
+                      <Button
+                        key={cell.id}
+                        type="button"
+                        variant="secondary"
+                        className="plant-placed-button"
+                        style={{
+                          left: `${origin.leftPct}%`,
+                          top: `${origin.topPct}%`,
+                        }}
+                        disabled={cellRequiresControlLease(cell) && !youHold}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          void pressCell(cell);
+                        }}
+                        onPointerUp={() => releaseCell(cell)}
+                        onPointerCancel={() => releaseCell(cell)}
+                        aria-label={cell.label}
+                      >
+                        {cell.label}
+                      </Button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </HelpTip>

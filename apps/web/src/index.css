@@ -145,9 +145,9 @@
   @apply flex w-full shrink-0 flex-col;
 }
 
-/* HMI plant graphic — stable height so the dashboard stays above the buttons. */
+/* HMI plant graphic — chrome above the picture so title/status never cover it. */
 .plant-graphic {
-  @apply relative isolate h-[9rem] w-full shrink-0 overflow-hidden rounded-xl border border-white/10 md:h-[11rem] md:rounded-2xl;
+  @apply relative isolate flex h-[9rem] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-white/10 md:h-[11rem] md:rounded-2xl;
   background:
     radial-gradient(
       120% 80% at 50% 110%,
@@ -165,7 +165,10 @@
     inset 0 -1px 0 rgba(0, 0, 0, 0.55),
     0 12px 28px rgba(0, 0, 0, 0.35);
 }
-.plant-graphic::before {
+.plant-picture {
+  @apply relative min-h-0 flex-1 overflow-hidden;
+}
+.plant-picture::before {
   content: '';
   @apply pointer-events-none absolute inset-x-[8%] top-[42%] z-[1] h-px;
   background: linear-gradient(
@@ -175,7 +178,7 @@
     transparent
   );
 }
-.plant-graphic::after {
+.plant-picture::after {
   content: '';
   @apply pointer-events-none absolute inset-0 z-[1];
   background:
@@ -204,7 +207,7 @@
   filter: none;
 }
 .plant-cluster-chrome {
-  @apply absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 px-3.5 pb-2 pt-3 md:px-5 md:pt-3.5;
+  @apply relative z-20 flex shrink-0 items-center justify-between gap-3 px-3.5 pb-1.5 pt-2 md:px-5 md:pb-2 md:pt-2.5;
 }
 .plant-cluster-title {
   @apply truncate text-[10px] font-medium uppercase tracking-[0.28em] text-white/70 md:text-[11px];
@@ -296,7 +299,7 @@
   }
 }
 .plant-overlay-stage {
-  @apply pointer-events-none absolute inset-x-0 bottom-[5.75rem] top-11 z-[10] hidden overflow-hidden md:bottom-[6.25rem] md:top-12 md:block;
+  @apply pointer-events-none absolute inset-0 z-[10] hidden overflow-hidden md:block;
 }
 .plant-overlay {
   @apply absolute z-10 flex min-w-0 -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0 rounded border border-white/18 bg-black/70 px-1 py-px text-center shadow-[0_4px_10px_rgba(0,0,0,0.35)];
@@ -438,10 +441,6 @@
 .operator-shell[data-pendant='screen'] .plant-overlay-stage {
   display: block;
   overflow: hidden;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
 }
 /* Top-left of the chip is the X/Y point, so a corner value stays inside the picture. */
 .operator-shell[data-pendant='screen'] .plant-overlay {
@@ -699,10 +698,6 @@
   }
   .operator-shell[data-pendant='screen'] .plant-overlay-stage {
     display: block;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
   }
   .plant-mimic-stage {
     top: 1.4rem;
