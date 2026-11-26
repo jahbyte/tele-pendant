@@ -1,6 +1,27 @@
-import { matchVoiceCommand } from './voice-match';
+import { isNegatedVoiceCommand, matchVoiceCommand } from './voice-match';
 
 describe('matchVoiceCommand', () => {
+  it("refuses do not / never / don't instead of running the command", () => {
+    expect(matchVoiceCommand('do not open owff')).toBeNull();
+    expect(matchVoiceCommand('do not open the flux flap')).toBeNull();
+    expect(matchVoiceCommand('never open owff')).toBeNull();
+    expect(matchVoiceCommand("don't hoist up")).toBeNull();
+    expect(matchVoiceCommand('dont enable')).toBeNull();
+    expect(matchVoiceCommand('never enable')).toBeNull();
+    expect(matchVoiceCommand('do not stop')).toBeNull();
+    expect(matchVoiceCommand('no hoist up')).toBeNull();
+
+    expect(isNegatedVoiceCommand('do not open the flux flap')).toBe(true);
+    expect(isNegatedVoiceCommand('never open owff')).toBe(true);
+    expect(isNegatedVoiceCommand("don't hoist up")).toBe(true);
+    expect(isNegatedVoiceCommand('owff open')).toBe(false);
+    expect(isNegatedVoiceCommand('I do not know')).toBe(false);
+    // Negation alone / filler-only after strip is not an allowlisted command.
+    expect(isNegatedVoiceCommand('never')).toBe(false);
+    expect(isNegatedVoiceCommand('not')).toBe(false);
+    expect(matchVoiceCommand('please okay now')).toBeNull();
+  });
+
   it('maps stop and enable', () => {
     expect(matchVoiceCommand('stop')).toEqual({ label: 'STOP' });
     expect(matchVoiceCommand('please stop')).toEqual({ label: 'STOP' });
@@ -125,6 +146,14 @@ describe('matchVoiceCommand', () => {
     expect(matchVoiceCommand('owff open')).toEqual({
       label: 'OWFF Welding Flux Flap close/open',
       direction: 'b',
+    });
+    expect(matchVoiceCommand('open the flux flap')).toEqual({
+      label: 'OWFF Welding Flux Flap close/open',
+      direction: 'b',
+    });
+    expect(matchVoiceCommand('close flap')).toEqual({
+      label: 'OWFF Welding Flux Flap close/open',
+      direction: 'a',
     });
     expect(matchVoiceCommand('owff opened')).toEqual({
       label: 'OWFF Welding Flux Flap close/open',

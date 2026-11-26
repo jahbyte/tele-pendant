@@ -264,6 +264,32 @@ describe('MediaService', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('refuses negated voice commands and does not fall through to a positive alt', async () => {
+    const result = await service.voiceCommand('do not open the flux flap', {
+      role: UserRole.OPERATOR,
+      clientId: 'device-1',
+      userId: 'u1',
+      alternatives: ['open owff', 'owff open'],
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: 'command_negated',
+        transcript: 'do not open the flux flap',
+      }),
+    );
+    expect(hmiService.activateCell).not.toHaveBeenCalled();
+
+    const never = await service.voiceCommand('never hoist up', {
+      role: UserRole.OPERATOR,
+      clientId: 'device-1',
+      userId: 'u1',
+    });
+    expect(never).toEqual(
+      expect.objectContaining({ ok: false, reason: 'command_negated' }),
+    );
+  });
+
   it('maps exact and fuzzy voice aliases to P03A21 cells', async () => {
     const exact = await service.voiceCommand('owva up', {
       role: UserRole.OPERATOR,

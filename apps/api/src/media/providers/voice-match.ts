@@ -10,7 +10,11 @@ const FILLERS = new Set([
   'ok',
   'okay',
   'now',
+  'do',
 ]);
+
+/** Spoken negation — refuse the command rather than invert it. */
+const NEGATION_WORDS = new Set(['not', 'never', 'dont', 'no']);
 
 /** Allowlisted cell label plus optional selector rocker side. */
 export type VoiceMatch = {
@@ -25,15 +29,27 @@ const CLOSE_WORDS = new Set(['close', 'closed']);
 const OPEN_WORDS = new Set(['open', 'opened']);
 
 function normalize(transcript: string): string[] {
-  return transcript
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((token) => token.length > 0);
+  return (
+    transcript
+      .toLowerCase()
+      // don't / won't → do not / wo not so negation is a real token
+      .replace(/n't\b/g, ' not')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length > 0)
+  );
 }
 
 function spoken(tokens: string[]): string[] {
   return tokens.filter((token) => !FILLERS.has(token));
+}
+
+function hasNegation(tokens: string[]): boolean {
+  return tokens.some((token) => NEGATION_WORDS.has(token));
+}
+
+function withoutNegation(tokens: string[]): string[] {
+  return tokens.filter((token) => !NEGATION_WORDS.has(token));
 }
 
 function has(tokens: string[], word: string): boolean {
@@ -67,11 +83,29 @@ function directionUpDown(tokens: string[]): 'a' | 'b' | null {
 }
 
 /**
+ * True when the transcript contains negation and would otherwise map to a
+ * command (e.g. "do not open owff"). Used so the API can refuse clearly
+ * instead of falling through to a positive speech alternative.
+ */
+export function isNegatedVoiceCommand(transcript: string): boolean {
+  const tokens = normalize(transcript);
+  if (tokens.length === 0 || !hasNegation(tokens)) return false;
+  return matchTokens(withoutNegation(tokens)) !== null;
+}
+
+/**
  * Map a speech transcript to a P03A21 pendant cell label.
  * Bare up/down (and legacy hoist) drive OWVA; trolley aliases drive OWHA.
+ * Negated phrases ("do not…", "never…") never match — they are refused.
  */
 export function matchVoiceCommand(transcript: string): VoiceMatch | null {
   const tokens = normalize(transcript);
+  if (tokens.length === 0) return null;
+  if (hasNegation(tokens)) return null;
+  return matchTokens(tokens);
+}
+
+function matchTokens(tokens: string[]): VoiceMatch | null {
   if (tokens.length === 0) return null;
 
   if (tokens.some((token) => token === 'stop' || token === 'stopped')) {
@@ -79,6 +113,7 @@ export function matchVoiceCommand(transcript: string): VoiceMatch | null {
   }
 
   const words = spoken(tokens);
+  if (words.length === 0) return null;
 
   if (has(words, 'enable')) {
     return { label: 'Enable' };
@@ -123,7 +158,8 @@ export function matchVoiceCommand(transcript: string): VoiceMatch | null {
     return { label: 'OWVA, OWCA, OWCVA Move Welding Posit.' };
   }
 
-  if (has(words, 'owff')) {
+  // Flux flap aliases — operators say the plant name, not only "owff".
+  if (has(words, 'owff') || has(words, 'flux') || has(words, 'flap')) {
     if (hasAny(words, CLOSE_WORDS) && !hasAny(words, OPEN_WORDS)) {
       return { label: 'OWFF Welding Flux Flap close/open', direction: 'a' };
     }

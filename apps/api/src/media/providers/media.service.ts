@@ -14,7 +14,7 @@ import { HmiService } from '../../hmi/providers/hmi.service';
 import { SafetyStateService } from '../../safety/providers/safety-state.service';
 import { UserRole } from '../../users/enums/user-role.enum';
 import { ScanCode } from '../entities/scan-code.entity';
-import { matchVoiceCommand } from './voice-match';
+import { isNegatedVoiceCommand, matchVoiceCommand } from './voice-match';
 
 /** How long a spoken hold-to-run command stays asserted. */
 const VOICE_JOG_MS = 2500;
@@ -168,6 +168,15 @@ export class MediaService implements OnModuleInit {
     let direction: 'a' | 'b' | undefined;
     let heard = transcript;
     for (const phrase of phrases) {
+      // Refuse "do not open…" instead of falling through to a positive alt.
+      if (isNegatedVoiceCommand(phrase)) {
+        return {
+          ok: false,
+          reason: 'command_negated',
+          transcript: phrase,
+          message: 'Negated voice commands are ignored.',
+        };
+      }
       const hit = matchVoiceCommand(phrase);
       if (!hit) continue;
       if (hit.label === 'STOP') {
