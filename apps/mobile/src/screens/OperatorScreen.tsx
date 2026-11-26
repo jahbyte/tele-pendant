@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   cellPulsesDeadman,
   cellRequiresControlLease,
+  cellUsesCommandHoldWatchdog,
   cellUsesHoldToRun,
   containedImageRect,
   formatOverlay,
@@ -347,18 +348,19 @@ export function OperatorScreen({ token }: { token: string }) {
 
   const dropMotionCoil = useCallback(
     async (cellId: string, direction?: 'a' | 'b' | null) => {
-      try {
-        await apiPost(
-          `/hmi/cells/${cellId}/activate`,
-          {
-            value: false,
-            speed: jogSpeedRef.current,
-            ...(direction ? { direction } : {}),
-          },
-          token,
-        );
-      } catch {
-        // Best-effort coil drop.
+      const body = {
+        value: false,
+        speed: jogSpeedRef.current,
+        ...(direction ? { direction } : {}),
+      };
+      for (let n = 1; n <= 5; n += 1) {
+        try {
+          await apiPost(`/hmi/cells/${cellId}/activate`, body, token);
+          return;
+        } catch {
+          if (n >= 5) return;
+          await new Promise<void>((resolve) => setTimeout(resolve, 300 * n));
+        }
       }
     },
     [token],
@@ -386,6 +388,15 @@ export function OperatorScreen({ token }: { token: string }) {
       if (cell?.style === 'enable') {
         // WS release clears Enable even when HTTP activate(false) is lost.
         socketRef.current?.emit('enable.release');
+      }
+      if (
+        cell &&
+        cellUsesCommandHoldWatchdog(cell) &&
+        cell.primaryRegister?.kind === 'coil'
+      ) {
+        socketRef.current?.emit('command.release', {
+          addresses: [cell.primaryRegister.address],
+        });
       }
       void dropMotionCoil(cellId, direction);
     },
@@ -422,6 +433,24 @@ export function OperatorScreen({ token }: { token: string }) {
     if (!enableHeld) return;
     const pulse = () => {
       socketRef.current?.emit('enable.pulse');
+    };
+    pulse();
+    const id = setInterval(pulse, 400);
+    return () => clearInterval(id);
+  }, [heldVersion, layoutQuery.data?.cells]);
+
+  // Teach / Seam pushbutton holds: same lost-release protection as Enable.
+  useEffect(() => {
+    void heldVersion;
+    const commandHeld = [...holdsRef.current.values()].some((hold) => {
+      const cell = layoutQuery.data?.cells.find(
+        (row) => row.id === hold.cellId,
+      );
+      return Boolean(cell && cellUsesCommandHoldWatchdog(cell));
+    });
+    if (!commandHeld) return;
+    const pulse = () => {
+      socketRef.current?.emit('command.pulse');
     };
     pulse();
     const id = setInterval(pulse, 400);
@@ -581,6 +610,14 @@ export function OperatorScreen({ token }: { token: string }) {
           if (!cell || !cellUsesHoldToRun(cell)) continue;
           if (cell.style === 'enable') {
             socketRef.current?.emit('enable.release');
+          }
+          if (
+            cellUsesCommandHoldWatchdog(cell) &&
+            cell.primaryRegister?.kind === 'coil'
+          ) {
+            socketRef.current?.emit('command.release', {
+              addresses: [cell.primaryRegister.address],
+            });
           }
           void apiPost(
             `/hmi/cells/${hold.cellId}/activate`,

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
@@ -159,6 +160,42 @@ export class RealtimeGateway
     this.safetyState.releaseEnable({
       userId: user?.sub,
       dropCoil: true,
+    });
+    return this.safetyState.snapshot(user?.sub, this.controlClientIdOf(client));
+  }
+
+  /**
+   * Keep Teach / Seam / other pushbutton holds alive while the finger is down.
+   * Stopping pulses drops those coils even if activate(false) was lost.
+   */
+  @SubscribeMessage('command.pulse')
+  handleCommandPulse(@ConnectedSocket() client: Socket) {
+    const user = this.userOf(client);
+    if (!user?.sub) {
+      return this.safetyState.snapshot();
+    }
+    const clientId = this.controlClientIdOf(client);
+    this.safetyState.pulseCommandHolds({
+      userId: user.sub,
+      clientId,
+    });
+    return this.safetyState.snapshot(user.sub, clientId);
+  }
+
+  @SubscribeMessage('command.release')
+  handleCommandRelease(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload?: { addresses?: number[] },
+  ) {
+    const user = this.userOf(client);
+    const addresses = Array.isArray(payload?.addresses)
+      ? payload.addresses.filter(
+          (a) => typeof a === 'number' && Number.isFinite(a),
+        )
+      : undefined;
+    this.safetyState.releaseCommandHolds({
+      userId: user?.sub,
+      addresses,
     });
     return this.safetyState.snapshot(user?.sub, this.controlClientIdOf(client));
   }

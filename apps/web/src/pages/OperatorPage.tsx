@@ -12,6 +12,7 @@ import {
 import {
   cellPulsesDeadman,
   cellRequiresControlLease,
+  cellUsesCommandHoldWatchdog,
   cellUsesHoldToRun,
   containedImageRect,
   isOperatorStopCell,
@@ -356,6 +357,24 @@ export function OperatorPage() {
     return () => window.clearInterval(id);
   }, [heldVersion, layoutQuery.data?.cells]);
 
+  // Teach / Seam / other non-motion pushbuttons: same lost-release protection.
+  useEffect(() => {
+    const socket = getRealtimeSocket();
+    const commandHeld = [...holdsRef.current.values()].some((hold) => {
+      const heldCell = layoutQuery.data?.cells.find(
+        (c) => c.id === hold.cellId,
+      );
+      return Boolean(heldCell && cellUsesCommandHoldWatchdog(heldCell));
+    });
+    if (!commandHeld) return;
+    const pulse = () => {
+      socket.emit('command.pulse');
+    };
+    pulse();
+    const id = window.setInterval(pulse, 400);
+    return () => window.clearInterval(id);
+  }, [heldVersion, layoutQuery.data?.cells]);
+
   const activate = useMutation({
     mutationFn: (args: {
       id: string;
@@ -416,30 +435,48 @@ export function OperatorPage() {
       // WS release clears Enable even when HTTP activate(false) is lost.
       getRealtimeSocket().emit('enable.release');
     }
-    const t0 = Date.now();
-    void activate
-      .mutateAsync({
-        id: cell.id,
-        value: false,
-        speed:
-          cell.isMotion && (cell.variableSpeed ?? true)
-            ? jogSpeedRef.current
-            : undefined,
-        ...(direction ? { direction } : {}),
-      })
-      .then(() => {
-        motionDebug('hold.activate-false', {
-          cellId: cell.id,
-          ms: Date.now() - t0,
-        });
-      })
-      .catch((err: unknown) => {
-        motionDebug('hold.activate-false.fail', {
-          cellId: cell.id,
-          ms: Date.now() - t0,
-          message: err instanceof Error ? err.message : String(err),
-        });
+    if (
+      cellUsesCommandHoldWatchdog(cell) &&
+      cell.primaryRegister?.kind === 'coil'
+    ) {
+      getRealtimeSocket().emit('command.release', {
+        addresses: [cell.primaryRegister.address],
       });
+    }
+    const t0 = Date.now();
+    const body = {
+      id: cell.id,
+      value: false as const,
+      speed:
+        cell.isMotion && (cell.variableSpeed ?? true)
+          ? jogSpeedRef.current
+          : undefined,
+      ...(direction ? { direction } : {}),
+    };
+    // Retry activate(false) so a brief network gap does not leave the coil ON.
+    const attempt = (n: number) => {
+      void activate
+        .mutateAsync(body)
+        .then(() => {
+          motionDebug('hold.activate-false', {
+            cellId: cell.id,
+            ms: Date.now() - t0,
+            attempt: n,
+          });
+        })
+        .catch((err: unknown) => {
+          motionDebug('hold.activate-false.fail', {
+            cellId: cell.id,
+            ms: Date.now() - t0,
+            attempt: n,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          if (n < 5) {
+            window.setTimeout(() => attempt(n + 1), 300 * n);
+          }
+        });
+    };
+    attempt(1);
   }
 
   async function pressCell(cell: CellDto, direction?: 'a' | 'b') {

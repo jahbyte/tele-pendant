@@ -79,3 +79,14 @@ export function cellRequiresControlLease(cell: {
 export function cellPulsesDeadman(cell: { isMotion: boolean }): boolean {
   return cell.isMotion;
 }
+
+/**
+ * Non-motion pushbuttons (Teach, Seam, …) use a command-hold pulse watchdog so a
+ * lost activate(false) cannot leave the coil ON. Enable has its own watchdog.
+ */
+export function cellUsesCommandHoldWatchdog(cell: {
+  style: string;
+  isMotion: boolean;
+}): boolean {
+  return !cell.isMotion && cell.style === 'pushbutton';
+}

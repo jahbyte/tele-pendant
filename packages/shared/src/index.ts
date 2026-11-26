@@ -53,6 +53,7 @@ export type {
 export {
   cellPulsesDeadman,
   cellRequiresControlLease,
+  cellUsesCommandHoldWatchdog,
   cellUsesHoldToRun,
   isOperatorStopCell,
   parseSelectorSideLabels,

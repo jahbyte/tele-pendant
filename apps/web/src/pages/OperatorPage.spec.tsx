@@ -2224,6 +2224,107 @@ describe('OperatorPage', () => {
     await screen.findByText('enable fail');
   });
 
+  it('retries Teach activate(false) when the release fetch fails', async () => {
+    const pendantLayout = {
+      ...layout,
+      matrix: { rows: 1, cols: 1 },
+      cells: [
+        {
+          id: 'teach1',
+          row: 0,
+          col: 0,
+          label: 'Teach Pipe Middle Position',
+          style: 'pushbutton',
+          isMotion: false,
+          requiresSafeAction: false,
+          primaryRegister: {
+            id: 'pt',
+            name: 'coil.p03a21.di.teachPipe',
+            address: 28,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+      ],
+    };
+    mockGetWithControl(pendantLayout);
+    let falseAttempts = 0;
+    mockPostWithControl(async (_path, body) => {
+      if ((body as { value?: boolean }).value === false) {
+        falseAttempts += 1;
+        if (falseAttempts < 3) throw new Error('Failed to fetch');
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    const teach = await screen.findByRole('button', {
+      name: 'Teach Pipe Middle Position',
+    });
+    fireEvent.pointerDown(teach);
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('command.pulse'),
+    );
+    fireEvent.pointerUp(teach);
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('command.release', {
+        addresses: [28],
+      }),
+    );
+    await waitFor(() => expect(falseAttempts).toBe(3), { timeout: 5000 });
+  });
+
+  it('stops retrying activate(false) after five failures', async () => {
+    const pendantLayout = {
+      ...layout,
+      matrix: { rows: 1, cols: 1 },
+      cells: [
+        {
+          id: 'teach1',
+          row: 0,
+          col: 0,
+          label: 'Teach Pipe Middle Position',
+          style: 'pushbutton',
+          isMotion: false,
+          requiresSafeAction: false,
+          primaryRegister: {
+            id: 'pt',
+            name: 'coil.p03a21.di.teachPipe',
+            address: 28,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+      ],
+    };
+    mockGetWithControl(pendantLayout);
+    let falseAttempts = 0;
+    mockPostWithControl(async (_path, body) => {
+      if ((body as { value?: boolean }).value === false) {
+        falseAttempts += 1;
+        throw new Error('Failed to fetch');
+      }
+      return { ok: true };
+    });
+    renderOperator(<OperatorPage />);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    const teach = await screen.findByRole('button', {
+      name: 'Teach Pipe Middle Position',
+    });
+    fireEvent.pointerDown(teach);
+    fireEvent.pointerUp(teach);
+    // Each dropCoil stops after five failures (300+600+900+1200ms).
+    await waitFor(
+      () => {
+        expect(falseAttempts).toBeGreaterThanOrEqual(5);
+        expect(falseAttempts % 5).toBe(0);
+      },
+      { timeout: 12000 },
+    );
+  });
+
   it('turns Enable off when it is released after a jog', async () => {
     const pendantLayout = {
       ...layout,
@@ -2396,6 +2497,18 @@ describe('OperatorPage', () => {
     expect(socket.emit).not.toHaveBeenCalledWith('deadman.release');
     fireEvent.pointerUp(weld);
     expect(socket.emit).toHaveBeenCalledWith('deadman.release');
+
+    socket.emit.mockClear();
+    fireEvent.pointerDown(teach);
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('command.pulse'),
+    );
+    fireEvent.pointerUp(teach);
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('command.release', {
+        addresses: [28],
+      }),
+    );
 
     socket.emit.mockClear();
     fireEvent.pointerDown(enable);

@@ -1022,6 +1022,91 @@ describe('SafetyStateService', () => {
     expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
   });
 
+  it('expires command pushbutton holds after lost pulses', async () => {
+    jest.useFakeTimers();
+    const now = Date.now();
+    jest.setSystemTime(now);
+    claimAs('u1');
+    service.noteCommandHoldAsserted(28, 'u1');
+    service.pulseCommandHolds({ userId: 'u1', clientId: clientFor('u1') });
+    jest.setSystemTime(now + 2600);
+    driver.writeCoil.mockClear();
+    await service.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(28, false);
+  });
+
+  it('WS command.release drops Teach coil when HTTP activate(false) was lost', async () => {
+    claimAs('u1');
+    service.noteCommandHoldAsserted(28, 'u1');
+    driver.writeCoil.mockClear();
+    service.releaseCommandHolds({ userId: 'u1', addresses: [28] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(driver.writeCoil).toHaveBeenCalledWith(28, false);
+
+    service.noteCommandHoldAsserted(28, 'u1');
+    driver.writeCoil.mockClear();
+    service.releaseCommandHolds({ userId: 'u2', addresses: [28] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(driver.writeCoil).not.toHaveBeenCalledWith(28, false);
+
+    service.noteCommandHoldCleared(28);
+    service.releaseCommandHolds({ addresses: [99] });
+    service.noteCommandHoldAsserted(30, 'u1');
+    service.noteCommandHoldAsserted(Number.NaN, 'u1');
+    service.clearAllCommandHolds();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(driver.writeCoil).toHaveBeenCalledWith(30, false);
+  });
+
+  it('retries command hold drop after write failure', async () => {
+    claimAs('u1');
+    service.noteCommandHoldAsserted(28, 'u1');
+    driver.writeCoil.mockRejectedValueOnce(new Error('busy'));
+    service.releaseCommandHolds({ userId: 'u1', addresses: [28] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    driver.writeCoil.mockRejectedValueOnce('down');
+    const priv = service as unknown as { pendingCommandDrop: Set<number> };
+    priv.pendingCommandDrop.add(28);
+    await service.tick();
+    driver.writeCoil.mockResolvedValue(undefined);
+    driver.writeCoil.mockClear();
+    priv.pendingCommandDrop.add(28);
+    await service.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(28, false);
+  });
+
+  it('covers command-hold pulse edge cases', async () => {
+    claimAs('u1');
+    service.pulseCommandHolds({ userId: 'u1', clientId: clientFor('u1') });
+    service.noteCommandHoldAsserted(28);
+    service.pulseCommandHolds({ userId: '  ', clientId: clientFor('u1') });
+    service.pulseCommandHolds({ userId: 'u2', clientId: clientFor('u2') });
+    // Other user's hold must be skipped when pulsing as u1.
+    service.noteCommandHoldAsserted(40, 'u-other');
+    service.noteCommandHoldAsserted(41, 'u1');
+    service.pulseCommandHolds({ userId: 'u1', clientId: clientFor('u1') });
+    service.noteCommandHoldCleared(Number.NaN);
+    service.releaseCommandHolds({
+      userId: 'u1',
+      addresses: [Number.NaN, 28],
+    });
+    service.noteCommandHoldAsserted(29, 'u1');
+    service.releaseCommandHolds({ userId: 'u1', force: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    jest.useFakeTimers();
+    const now = Date.now();
+    jest.setSystemTime(now);
+    service.noteCommandHoldAsserted(55, 'u1');
+    driver.writeCoil.mockClear();
+    // Fresh hold: timeout branch stays false.
+    await service.tick();
+    expect(driver.writeCoil).not.toHaveBeenCalledWith(55, false);
+    jest.setSystemTime(now + 3000);
+    await service.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(55, false);
+  });
+
   it('skips Enable drop when PLC is disconnected and retries non-Error failures', async () => {
     claimAs('u1');
     registers.findOneBy.mockResolvedValue({

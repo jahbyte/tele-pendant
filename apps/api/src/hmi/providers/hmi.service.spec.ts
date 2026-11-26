@@ -94,6 +94,8 @@ describe('HmiService', () => {
     noteMotionCoilCleared: jest.fn(),
     noteEnableAsserted: jest.fn(),
     noteEnableCleared: jest.fn(),
+    noteCommandHoldAsserted: jest.fn(),
+    noteCommandHoldCleared: jest.fn(),
     isEnableHeld: jest.fn().mockReturnValue(true),
     getRoles: jest.fn().mockResolvedValue({
       eStopRegisterId: 'estop-id',
@@ -646,6 +648,31 @@ describe('HmiService', () => {
     });
     expect(plcService.writeCoil).toHaveBeenCalledWith(26, false);
     expect(plcService.writeCoil).toHaveBeenCalledWith(27, false);
+  });
+
+  it('tracks command-hold watchdog for Teach-style pushbuttons', async () => {
+    cells.findOne.mockResolvedValue({
+      id: 'teach',
+      label: 'Teach Pipe Middle Position',
+      style: 'pushbutton',
+      isMotion: false,
+      requiresSafeAction: false,
+      primaryRegister: {
+        kind: 'coil',
+        address: 28,
+        name: 'coil.p03a21.di.teachPipeMiddle',
+      },
+    });
+    await service.activateCell('teach', true, {
+      role: UserRole.OPERATOR,
+      userId: 'u1',
+    });
+    expect(safetyState.noteCommandHoldAsserted).toHaveBeenCalledWith(28, 'u1');
+    await service.activateCell('teach', false, {
+      role: UserRole.OPERATOR,
+      userId: 'u1',
+    });
+    expect(safetyState.noteCommandHoldCleared).toHaveBeenCalledWith(28);
   });
 
   it('drops jog coils when Enable is released through the API', async () => {

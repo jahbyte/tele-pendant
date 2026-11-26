@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cellPulsesDeadman,
   cellRequiresControlLease,
+  cellUsesCommandHoldWatchdog,
   cellUsesHoldToRun,
   parseSelectorSideLabels,
   pendantLegendLines,
@@ -98,5 +99,19 @@ describe('cellPulsesDeadman', () => {
   it('pulses only motion holds', () => {
     expect(cellPulsesDeadman({ isMotion: true })).toBe(true);
     expect(cellPulsesDeadman({ isMotion: false })).toBe(false);
+  });
+});
+
+describe('cellUsesCommandHoldWatchdog', () => {
+  it('covers non-motion pushbuttons only', () => {
+    expect(
+      cellUsesCommandHoldWatchdog({ style: 'pushbutton', isMotion: false }),
+    ).toBe(true);
+    expect(
+      cellUsesCommandHoldWatchdog({ style: 'pushbutton', isMotion: true }),
+    ).toBe(false);
+    expect(
+      cellUsesCommandHoldWatchdog({ style: 'enable', isMotion: false }),
+    ).toBe(false);
   });
 });

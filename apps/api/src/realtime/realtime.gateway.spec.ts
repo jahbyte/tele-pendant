@@ -6,6 +6,8 @@ describe('RealtimeGateway', () => {
     releaseDeadman: jest.fn().mockResolvedValue({ mode: 'normal' }),
     pulseEnable: jest.fn(),
     releaseEnable: jest.fn(),
+    pulseCommandHolds: jest.fn(),
+    releaseCommandHolds: jest.fn(),
     noteSocketDisconnect: jest.fn(),
     snapshot: jest
       .fn()
@@ -207,5 +209,37 @@ describe('RealtimeGateway', () => {
     gateway.handleEnablePulse(client({ user: undefined }) as never);
     expect(safetyState.pulseEnable).not.toHaveBeenCalled();
     expect(safetyState.snapshot).toHaveBeenCalled();
+  });
+
+  it('pulses and releases command holds for pushbutton cells', () => {
+    const sock = client({
+      id: 'sock-4',
+      user: { sub: 'u1' },
+    });
+    expect(gateway.handleCommandPulse(sock as never)).toEqual({
+      mode: 'normal',
+      deadmanActive: false,
+    });
+    expect(safetyState.pulseCommandHolds).toHaveBeenCalledWith({
+      userId: 'u1',
+      clientId: '',
+    });
+    expect(
+      gateway.handleCommandRelease(sock as never, {
+        addresses: [28],
+      }),
+    ).toEqual({
+      mode: 'normal',
+      deadmanActive: false,
+    });
+    expect(safetyState.releaseCommandHolds).toHaveBeenCalledWith({
+      userId: 'u1',
+      addresses: [28],
+    });
+  });
+
+  it('ignores command pulse when the socket has no user', () => {
+    gateway.handleCommandPulse(client({ user: undefined }) as never);
+    expect(safetyState.pulseCommandHolds).not.toHaveBeenCalled();
   });
 });

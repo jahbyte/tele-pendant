@@ -75,11 +75,21 @@ export class SafetyStateService implements OnModuleInit {
   private lastEnablePulseAt: Date | null = null;
   private enableHolderUserId: string | null = null;
   private needsEnableDrop = false;
+  /**
+   * Non-motion pushbutton holds (Teach, Seam, …). Lost activate(false) must
+   * not leave those coils ON indefinitely.
+   */
+  private assertedCommandHolds = new Map<
+    number,
+    { lastPulseAt: number; userId: string | null }
+  >();
+  private pendingCommandDrop = new Set<number>();
   private readonly watchdogTimeoutMs = 2000;
   /** Missed client pulses before motion drop (tight; WS pulse every 400ms). */
   private readonly deadmanTimeoutMs = 2500;
   /** Same window as deadman — clients pulse Enable every ~400ms while held. */
   private readonly enableTimeoutMs = 2500;
+  private readonly commandHoldTimeoutMs = 2500;
   private allowTimedMedia = false;
 
   private readonly plcService: PlcService;
@@ -128,8 +138,10 @@ export class SafetyStateService implements OnModuleInit {
     if (!driver.isConnected()) return;
     try {
       this.noteEnableCleared();
+      this.clearAllCommandHolds();
       await this.clearMotionCoils();
       await this.clearCommandCoils();
+      await this.dropPendingCommandHolds();
       const deadman = await this.roleAddress(
         'deadmanRegisterId',
         'coil.deadman',
@@ -373,6 +385,80 @@ export class SafetyStateService implements OnModuleInit {
     this.enableActive = false;
     this.lastEnablePulseAt = null;
     this.enableHolderUserId = null;
+  }
+
+  /** Track a non-motion pushbutton coil after activate(true). */
+  noteCommandHoldAsserted(address: number, userId?: string | null): void {
+    if (!Number.isFinite(address)) return;
+    this.assertedCommandHolds.set(address, {
+      lastPulseAt: Date.now(),
+      userId: userId?.trim() || null,
+    });
+    this.pendingCommandDrop.delete(address);
+    motionDebug('command.hold.asserted', { address, userId: userId ?? null });
+  }
+
+  noteCommandHoldCleared(address: number): void {
+    if (!Number.isFinite(address)) return;
+    this.assertedCommandHolds.delete(address);
+    this.pendingCommandDrop.delete(address);
+  }
+
+  /** Refresh lifetime for all command holds owned by this control holder. */
+  pulseCommandHolds(holder: {
+    userId: string;
+    clientId?: string | null;
+  }): void {
+    const userId = holder.userId?.trim();
+    if (!userId || this.assertedCommandHolds.size === 0) return;
+    if (!this.controlLease.holds(userId, holder.clientId)) return;
+    const now = Date.now();
+    for (const [address, hold] of this.assertedCommandHolds) {
+      if (hold.userId && hold.userId !== userId) continue;
+      this.assertedCommandHolds.set(address, { lastPulseAt: now, userId });
+      this.pendingCommandDrop.delete(address);
+    }
+  }
+
+  /**
+   * Drop specific command coils (or all for this user) when HTTP release is lost.
+   */
+  releaseCommandHolds(opts: {
+    userId?: string | null;
+    addresses?: number[];
+    force?: boolean;
+  }): void {
+    const userId = opts.userId?.trim() || null;
+    const targets =
+      opts.addresses && opts.addresses.length > 0
+        ? opts.addresses.filter((a) => Number.isFinite(a))
+        : [...this.assertedCommandHolds.keys()];
+    for (const address of targets) {
+      const hold = this.assertedCommandHolds.get(address);
+      if (!hold && !opts.force) continue;
+      if (!opts.force && hold?.userId && userId && hold.userId !== userId) {
+        continue;
+      }
+      this.assertedCommandHolds.delete(address);
+      this.pendingCommandDrop.add(address);
+    }
+    if (this.pendingCommandDrop.size > 0) {
+      motionDebug('command.hold.release', {
+        userId,
+        addresses: [...this.pendingCommandDrop],
+      });
+      void this.dropPendingCommandHolds();
+    }
+  }
+
+  clearAllCommandHolds(): void {
+    for (const address of this.assertedCommandHolds.keys()) {
+      this.pendingCommandDrop.add(address);
+    }
+    this.assertedCommandHolds.clear();
+    if (this.pendingCommandDrop.size > 0) {
+      void this.dropPendingCommandHolds();
+    }
   }
 
   controlSnapshot(
@@ -743,6 +829,24 @@ export class SafetyStateService implements OnModuleInit {
         await this.dropEnableAndJogCoils();
       }
 
+      // Command pushbutton holds (Teach, …): lost release / offline drops coils.
+      const nowCmd = Date.now();
+      for (const [address, hold] of [...this.assertedCommandHolds.entries()]) {
+        if (nowCmd - hold.lastPulseAt > this.commandHoldTimeoutMs) {
+          motionDebug('command.hold.timeout-drop', {
+            address,
+            ageMs: nowCmd - hold.lastPulseAt,
+            timeoutMs: this.commandHoldTimeoutMs,
+            holderUserId: hold.userId,
+          });
+          this.assertedCommandHolds.delete(address);
+          this.pendingCommandDrop.add(address);
+        }
+      }
+      if (this.pendingCommandDrop.size > 0) {
+        await this.dropPendingCommandHolds();
+      }
+
       if (this.mode === 'safe_state' && !this.eStopActive) {
         this.mode = 'normal';
       }
@@ -762,7 +866,25 @@ export class SafetyStateService implements OnModuleInit {
     if (!this.controlLease.consumeControlLost()) return;
     await this.releaseDeadman({ force: true });
     this.noteEnableCleared();
+    this.clearAllCommandHolds();
     await this.clearCommandCoils();
+    await this.dropPendingCommandHolds();
+  }
+
+  /** Write pending command-hold coils false. Retried from tick on failure. */
+  private async dropPendingCommandHolds(): Promise<void> {
+    const driver = this.plcService.getDriver();
+    if (!driver.isConnected() || this.pendingCommandDrop.size === 0) return;
+    const addrs = [...this.pendingCommandDrop];
+    try {
+      for (const address of addrs) {
+        await driver.writeCoil(address, false);
+        this.pendingCommandDrop.delete(address);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Command hold drop failed (will retry): ${message}`);
+    }
   }
 
   /**
@@ -867,10 +989,12 @@ export class SafetyStateService implements OnModuleInit {
     if (mode === 'comms_lost' || mode === 'safe_state' || mode === 'e_stop') {
       try {
         this.noteEnableCleared();
+        this.clearAllCommandHolds();
         const driver = this.plcService.getDriver();
         if (driver.isConnected()) {
           await this.clearMotionCoils();
           await this.clearCommandCoils();
+          await this.dropPendingCommandHolds();
           const deadman = await this.roleAddress(
             'deadmanRegisterId',
             'coil.deadman',

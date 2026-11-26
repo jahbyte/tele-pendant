@@ -34,7 +34,10 @@ import {
 } from '../hmi-assets';
 import { renderPdfFirstPage } from '../hmi-pdf';
 import { pendantDiName } from '@tele-pendant/modbus-core';
-import { cellRequiresControlLease } from '@tele-pendant/shared';
+import {
+  cellRequiresControlLease,
+  cellUsesCommandHoldWatchdog,
+} from '@tele-pendant/shared';
 
 type Actor = AuditActor;
 
@@ -687,6 +690,21 @@ export class HmiService {
     if (cell.style === 'enable') {
       if (value) this.safetyState.noteEnableAsserted(opts.userId);
       else this.safetyState.noteEnableCleared();
+    }
+
+    if (
+      cellUsesCommandHoldWatchdog(cell) &&
+      activeReg.kind === 'coil' &&
+      !opts.refresh
+    ) {
+      if (value) {
+        this.safetyState.noteCommandHoldAsserted(
+          activeReg.address,
+          opts.userId,
+        );
+      } else {
+        this.safetyState.noteCommandHoldCleared(activeReg.address);
+      }
     }
 
     if (!opts.refresh) {
