@@ -243,6 +243,165 @@ describe('HmiService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('blocks Motion-off button that reuses a motion coil without deadman', async () => {
+    // Real motion cell still owns coil.hoistUp; misconfigured pushbutton shares it.
+    cells.find.mockResolvedValue([motionCell]);
+    cells.findOne.mockResolvedValue({
+      ...motionCell,
+      id: 'bad-owva',
+      label: 'Bad OWVA up',
+      style: 'pushbutton',
+      isMotion: false,
+      variableSpeed: false,
+      primaryRegister: {
+        kind: 'coil',
+        address: 0,
+        name: 'coil.hoistUp',
+      },
+    });
+    safetyState.canIssueMotion.mockReturnValue(false);
+    await expect(
+      service.activateCell('bad-owva', true, {
+        role: UserRole.OPERATOR,
+        userId: 'u1',
+      }),
+    ).rejects.toThrow(/Motion blocked/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+  });
+
+  it('gates Motion-off buttons that share a motion coil by register id or name', async () => {
+    cells.find.mockResolvedValue([
+      {
+        id: 'real-jog',
+        isMotion: true,
+        primaryRegister: {
+          id: 'reg-up',
+          kind: 'coil',
+          address: 26,
+          name: 'coil.owvaUp',
+        },
+        secondaryRegister: {
+          kind: 'discrete',
+          address: 1,
+          name: 'discrete.unused',
+        },
+      },
+    ]);
+    safetyState.canIssueMotion.mockReturnValue(false);
+
+    // Same register id, different address (duplicate map row).
+    cells.findOne.mockResolvedValue({
+      id: 'bad-id',
+      label: 'Bad by id',
+      style: 'pushbutton',
+      isMotion: false,
+      requiresSafeAction: false,
+      variableSpeed: false,
+      primaryRegister: {
+        id: 'reg-up',
+        kind: 'coil',
+        address: 99,
+        name: 'coil.alias',
+      },
+    });
+    await expect(
+      service.activateCell('bad-id', true, {
+        role: UserRole.OPERATOR,
+        userId: 'u1',
+      }),
+    ).rejects.toThrow(/Motion blocked/);
+
+    // Same name only (no id / address overlap with the motion cell).
+    cells.findOne.mockResolvedValue({
+      id: 'bad-name',
+      label: 'Bad by name',
+      style: 'pushbutton',
+      isMotion: false,
+      requiresSafeAction: false,
+      variableSpeed: false,
+      primaryRegister: {
+        kind: 'coil',
+        name: 'coil.owvaUp',
+      },
+    });
+    await expect(
+      service.activateCell('bad-name', true, {
+        role: UserRole.OPERATOR,
+        userId: 'u1',
+      }),
+    ).rejects.toThrow(/Motion blocked/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+  });
+
+  it('blocks Motion-off button on motion coil without Enable', async () => {
+    cells.find.mockResolvedValue([motionCell]);
+    cells.findOne.mockResolvedValue({
+      ...motionCell,
+      id: 'bad-owva',
+      label: 'Bad OWVA up',
+      style: 'pushbutton',
+      isMotion: false,
+      variableSpeed: false,
+      primaryRegister: {
+        kind: 'coil',
+        address: 0,
+        name: 'coil.hoistUp',
+      },
+    });
+    safetyState.canIssueMotion.mockReturnValue(true);
+    registers.findOneBy.mockImplementation(async (q: { name?: string }) => {
+      if (q.name === 'coil.p03a21.di.enable') {
+        return { kind: 'coil', address: 10, name: 'coil.p03a21.di.enable' };
+      }
+      return null;
+    });
+    plcService.getDriver.mockReturnValue({
+      readCoils: jest.fn().mockResolvedValue([false]),
+    });
+    await expect(
+      service.activateCell('bad-owva', true, {
+        role: UserRole.OPERATOR,
+        userId: 'u1',
+      }),
+    ).rejects.toThrow(/Hold Enable/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+  });
+
+  it('allows Motion-off button on motion coil when deadman and Enable are held', async () => {
+    cells.find.mockResolvedValue([motionCell]);
+    cells.findOne.mockResolvedValue({
+      ...motionCell,
+      id: 'bad-owva',
+      label: 'Bad OWVA up',
+      style: 'pushbutton',
+      isMotion: false,
+      variableSpeed: false,
+      primaryRegister: {
+        kind: 'coil',
+        address: 0,
+        name: 'coil.hoistUp',
+      },
+    });
+    safetyState.canIssueMotion.mockReturnValue(true);
+    registers.findOneBy.mockImplementation(async (q: { name?: string }) => {
+      if (q.name === 'coil.p03a21.di.enable') {
+        return { kind: 'coil', address: 10, name: 'coil.p03a21.di.enable' };
+      }
+      return null;
+    });
+    plcService.getDriver.mockReturnValue({
+      readCoils: jest.fn().mockResolvedValue([true]),
+    });
+    await expect(
+      service.activateCell('bad-owva', true, {
+        role: UserRole.OPERATOR,
+        userId: 'u1',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ ok: true }));
+    expect(plcService.writeCoil).toHaveBeenCalledWith(0, true);
+    expect(safetyState.noteMotionCoilAsserted).toHaveBeenCalledWith(0);
+  });
+
   it('blocks non-motion operator buttons without exclusive control', async () => {
     cells.findOne.mockResolvedValue({
       ...motionCell,
@@ -250,6 +409,11 @@ describe('HmiService', () => {
       label: 'Teach Pipe Middle Position',
       isMotion: false,
       variableSpeed: false,
+      primaryRegister: {
+        kind: 'coil',
+        address: 50,
+        name: 'coil.p03a21.di.teachPipeMiddle',
+      },
     });
     safetyState.holdsControl.mockReturnValue(false);
     await expect(
@@ -265,6 +429,11 @@ describe('HmiService', () => {
       label: 'OWFF Welding Flux Flap close/open',
       isMotion: false,
       variableSpeed: false,
+      primaryRegister: {
+        kind: 'coil',
+        address: 40,
+        name: 'coil.p03a21.di.owffClose',
+      },
       secondaryRegister: {
         kind: 'coil',
         address: 41,
@@ -290,6 +459,11 @@ describe('HmiService', () => {
       label: 'Teach Pipe Middle Position',
       isMotion: false,
       variableSpeed: false,
+      primaryRegister: {
+        kind: 'coil',
+        address: 50,
+        name: 'coil.p03a21.di.teachPipeMiddle',
+      },
     });
     await expect(
       service.activateCell('c1', true, {
@@ -660,6 +834,7 @@ describe('HmiService', () => {
       requiresSafeAction: true,
       label: 'STOP',
       style: 'estop',
+      primaryRegister: { kind: 'coil', address: 11, name: 'coil.eStop' },
     });
     await service.activateCell('stop', true, { role: UserRole.OPERATOR });
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -691,6 +866,7 @@ describe('HmiService', () => {
       label: 'STOP',
       style: 'estop',
       variableSpeed: false,
+      primaryRegister: { kind: 'coil', address: 11, name: 'coil.eStop' },
     });
     plcService.writeCoil.mockRejectedValueOnce(new Error('write failed'));
     const result = await service.activateCell('stop', true, {
@@ -1101,6 +1277,64 @@ describe('HmiService', () => {
     registers.findOneBy.mockResolvedValue(null);
     await service.writeGuardedCoil(99, true, { userId: 'u1' });
     expect(plcService.writeCoil).toHaveBeenCalledWith(99, true);
+  });
+
+  it('blocks raw writeGuardedCoil to a motion address with no matching cell', async () => {
+    // Unfiltered find → no owner cell; isMotion find → coil 26 is still motion.
+    cells.find.mockImplementation(
+      async (q?: { where?: { isMotion?: boolean } }) => {
+        if (q?.where?.isMotion) {
+          return [
+            {
+              id: 'jog',
+              isMotion: true,
+              primaryRegister: {
+                kind: 'coil',
+                address: 26,
+                name: 'coil.up',
+              },
+              secondaryRegister: null,
+            },
+          ];
+        }
+        return [];
+      },
+    );
+    safetyState.canIssueMotion.mockReturnValue(false);
+    safetyState.getRoles.mockResolvedValue({
+      eStopRegisterId: null,
+      deadmanRegisterId: null,
+      heartbeatRegisterId: null,
+      safeStateRegisterId: null,
+    });
+    registers.findOneBy.mockResolvedValue(null);
+    await expect(
+      service.writeGuardedCoil(26, true, { userId: 'u1', clientId: 'c1' }),
+    ).rejects.toThrow(/Motion blocked/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+
+    safetyState.canIssueMotion.mockReturnValue(true);
+    registers.findOneBy.mockImplementation(async (q: { name?: string }) => {
+      if (q.name === 'coil.p03a21.di.enable') {
+        return { kind: 'coil', address: 10, name: 'coil.p03a21.di.enable' };
+      }
+      return null;
+    });
+    plcService.getDriver.mockReturnValue({
+      readCoils: jest.fn().mockResolvedValue([false]),
+    });
+    await expect(
+      service.writeGuardedCoil(26, true, { userId: 'u1', clientId: 'c1' }),
+    ).rejects.toThrow(/Hold Enable/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+
+    plcService.getDriver.mockReturnValue({
+      readCoils: jest.fn().mockResolvedValue([true]),
+    });
+    await expect(
+      service.writeGuardedCoil(26, true, { userId: 'u1', clientId: 'c1' }),
+    ).resolves.toEqual({ ok: true });
+    expect(plcService.writeCoil).toHaveBeenCalledWith(26, true);
   });
 
   it('requires a PIN to move Enable or turn motion off', async () => {

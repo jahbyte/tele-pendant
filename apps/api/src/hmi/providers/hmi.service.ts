@@ -549,8 +549,17 @@ export class HmiService {
         'Operator buttons are blocked until safety mode is normal',
       );
     }
+    // Gate on the coil: a Motion-off button aimed at a motion coil still needs
+    // Enable, deadman, and control — not only the cell's isMotion flag.
+    // STOP must never wait on Enable/deadman.
+    const drivesMotionCoil =
+      !isEStopCell &&
+      ((await this.registerIsMotionCoil(cell.primaryRegister)) ||
+        (await this.registerIsMotionCoil(cell.secondaryRegister)));
+    const effectiveMotion = !isEStopCell && (cell.isMotion || drivesMotionCoil);
+
     const needsControl = cellRequiresControlLease({
-      isMotion: cell.isMotion,
+      isMotion: effectiveMotion,
       style: cell.style,
       label: cell.label,
       requiresSafeAction: cell.requiresSafeAction,
@@ -559,7 +568,7 @@ export class HmiService {
     // Motion release stays open so a dropped lease cannot leave a jog coil on.
     if (
       needsControl &&
-      (value || !cell.isMotion) &&
+      (value || !effectiveMotion) &&
       !this.safetyState.holdsControl(opts.userId, opts.clientId)
     ) {
       this.refuseActivation(
@@ -570,7 +579,7 @@ export class HmiService {
     }
 
     if (
-      cell.isMotion &&
+      effectiveMotion &&
       value &&
       !this.safetyState.canIssueMotion(opts.userId, opts.clientId)
     ) {
@@ -588,7 +597,7 @@ export class HmiService {
     }
 
     // Jog selectors and axis move pushbuttons (Home / Welding) need Enable.
-    if (cell.isMotion && value) {
+    if (effectiveMotion && value) {
       await this.assertEnableHeldForJog(opts, cell.label);
     }
 
@@ -616,7 +625,7 @@ export class HmiService {
     ) => {
       if (reg.kind === 'coil') {
         await this.plcService.writeCoil(reg.address, on);
-        if (cell.isMotion) {
+        if (effectiveMotion) {
           if (on) this.safetyState.noteMotionCoilAsserted(reg.address);
           else this.safetyState.noteMotionCoilCleared(reg.address);
         }
@@ -698,7 +707,7 @@ export class HmiService {
         .catch(() => undefined);
     }
 
-    if (cell.isMotion) {
+    if (effectiveMotion) {
       motionDebug('activate.ok', {
         cellId: cell.id,
         label: cell.label,
@@ -851,6 +860,15 @@ export class HmiService {
       });
       return { ok: true };
     }
+    // Raw address with no matching cell: still refuse motion coils without gates.
+    if (value && (await this.registerIsMotionCoil({ kind: 'coil', address }))) {
+      if (!this.safetyState.canIssueMotion(opts.userId, opts.clientId)) {
+        throw new ForbiddenException(
+          'Motion blocked: claim control, hold deadman, and ensure normal safety mode',
+        );
+      }
+      await this.assertEnableHeldForJog(opts, `coil:${address}`);
+    }
     if (estop && value) {
       await this.safetyState.latchOperatorEStop('STOP: raw coil');
     }
@@ -977,7 +995,11 @@ export class HmiService {
     }
   }
 
-  /** Turning Motion off removes the Enable and deadman gates for that button. */
+  /**
+   * Turning Motion off on a cell still leaves Enable/deadman gates in place when
+   * its register is used by any other Motion cell (activate gates on the coil).
+   * PIN is still required to flip the cell flag itself.
+   */
   private async assertMotionNotDemoted(
     row: Cell,
     input: CellInput,
@@ -995,6 +1017,34 @@ export class HmiService {
     });
     throw new ForbiddenException(
       'PIN does not match — required to turn motion off',
+    );
+  }
+
+  /**
+   * True when any Motion cell drives this coil (match by id, address, or name).
+   * Used so a Motion-off button cannot bypass gates by reusing a jog coil.
+   */
+  private async registerIsMotionCoil(
+    reg:
+      | { id?: string; kind?: string; address?: number; name?: string }
+      | null
+      | undefined,
+  ): Promise<boolean> {
+    if (!reg || reg.kind !== 'coil') return false;
+    const motion = await this.cells.find({
+      where: { isMotion: true },
+      relations: { primaryRegister: true, secondaryRegister: true },
+    });
+    return motion.some((cell) =>
+      [cell.primaryRegister, cell.secondaryRegister].some((r) => {
+        if (!r || r.kind !== 'coil') return false;
+        if (reg.id && r.id === reg.id) return true;
+        if (typeof reg.address === 'number' && r.address === reg.address) {
+          return true;
+        }
+        if (reg.name && r.name === reg.name) return true;
+        return false;
+      }),
     );
   }
 
