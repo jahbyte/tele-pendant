@@ -207,7 +207,7 @@ describe('HmiSeedService', () => {
     );
   });
 
-  it('leaves an existing picture and labels alone', async () => {
+  it('refreshes the plant SVG but leaves custom URL and existing labels alone', async () => {
     const { service, backgrounds, overlays } = makeService({
       cellCount: 12,
       selectorCount: 3,
@@ -220,15 +220,35 @@ describe('HmiSeedService', () => {
       imageUrl: '/hmi-assets/custom.svg',
     });
     overlays.count.mockResolvedValue(2);
-    const install = jest.spyOn(
-      service as unknown as { installDemoPlantAsset: () => string | null },
-      'installDemoPlantAsset',
-    );
+    const install = jest
+      .spyOn(
+        service as unknown as { installDemoPlantAsset: () => string | null },
+        'installDemoPlantAsset',
+      )
+      .mockReturnValue('/hmi-assets/demo-p03a21.svg');
 
     await service.onModuleInit();
 
-    expect(install).not.toHaveBeenCalled();
+    // Reinstall overwrites a leftover crane file; custom URL is not forced.
+    expect(install).toHaveBeenCalled();
+    expect(backgrounds.save).not.toHaveBeenCalledWith(
+      expect.objectContaining({ imageUrl: '/hmi-assets/demo-p03a21.svg' }),
+    );
     expect(overlays.save).not.toHaveBeenCalled();
+  });
+
+  it('installs the P03A21 plant SVG, not the legacy crane drawing', () => {
+    const { service } = makeService({
+      cellCount: 12,
+      activeBg: { name: 'demo-p03a21', active: true },
+    });
+    const sources = (
+      service as unknown as { demoPlantSvgSources: () => string[] }
+    ).demoPlantSvgSources();
+    expect(sources.every((path) => path.endsWith('demo-p03a21.svg'))).toBe(
+      true,
+    );
+    expect(sources.some((path) => path.includes('demo-crane.svg'))).toBe(false);
   });
 
   it('resets only demo-p03a21 cells and overlays, not other screens', async () => {

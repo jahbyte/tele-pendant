@@ -179,27 +179,21 @@ export class HmiSeedService implements OnModuleInit {
     this.logger.log(`Removed legacy demo-crane screen(s) (${rows.length})`);
   }
 
-  /** Paths that may hold docs/samples/hmi/demo-crane.svg in Docker or local cwd. */
+  /** Paths that may hold docs/samples/hmi/demo-p03a21.svg in Docker or local cwd. */
   private demoPlantSvgSources(): string[] {
     const cwd = process.cwd();
+    const file = DEMO_PLANT_ASSET;
     return [
-      join(cwd, 'docs', 'samples', 'hmi', 'demo-crane.svg'),
-      join(cwd, '..', '..', 'docs', 'samples', 'hmi', 'demo-crane.svg'),
-      join(
-        cwd,
-        'apps',
-        'api',
-        '..',
-        '..',
-        'docs',
-        'samples',
-        'hmi',
-        'demo-crane.svg',
-      ),
+      join(cwd, 'docs', 'samples', 'hmi', file),
+      join(cwd, '..', '..', 'docs', 'samples', 'hmi', file),
+      join(cwd, 'apps', 'api', '..', '..', 'docs', 'samples', 'hmi', file),
     ];
   }
 
-  /** Copy the sample plant drawing into the HMI asset folder. */
+  /**
+   * Copy the P03A21 plant drawing into the HMI asset folder.
+   * Always overwrites so upgrades replace a leftover crane SVG.
+   */
   private installDemoPlantAsset(): string | null {
     const source = this.demoPlantSvgSources().find((path) => existsSync(path));
     if (!source) {
@@ -209,15 +203,13 @@ export class HmiSeedService implements OnModuleInit {
       return null;
     }
     const dest = join(hmiAssetsDirectory(), DEMO_PLANT_ASSET);
-    if (!existsSync(dest)) {
-      copyFileSync(source, dest);
-    }
+    copyFileSync(source, dest);
     return hmiAssetPublicPath(DEMO_PLANT_ASSET);
   }
 
   /**
    * Fresh demo: plant drawing plus three live labels on demo-p03a21.
-   * Only fills a screen that still has no picture and no labels.
+   * Refreshes the on-disk SVG; only adds labels when the screen has none.
    */
   private async ensureDemoPlantExample(
     screen?: BackgroundDisplay | null,
@@ -227,9 +219,13 @@ export class HmiSeedService implements OnModuleInit {
       (await this.backgrounds.findOne({ where: { name: 'demo-p03a21' } }));
     if (!target || target.name !== 'demo-p03a21') return;
 
-    if (!target.imageUrl?.trim()) {
-      const imageUrl = this.installDemoPlantAsset();
-      if (imageUrl) {
+    // Always reinstall the SVG so upgrades replace a leftover crane drawing.
+    const imageUrl = this.installDemoPlantAsset();
+    if (imageUrl) {
+      const current = target.imageUrl?.trim() || '';
+      const usesDemoAsset =
+        !current || /demo-p03a21\.svg|demo-crane\.svg/i.test(current);
+      if (usesDemoAsset && current !== imageUrl) {
         target.imageUrl = imageUrl;
         await this.backgrounds.save(target);
         this.logger.log(`Demo plant picture set on ${target.name}`);

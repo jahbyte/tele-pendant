@@ -3,7 +3,7 @@ import { isSvgAsset, svgViewSize } from './plant-image';
 describe('plant image', () => {
   it('treats an svg path as svg and a png from a pdf as a raster', () => {
     expect(
-      isSvgAsset('http://192.168.0.192:4050/hmi-assets/demo-crane.svg'),
+      isSvgAsset('http://192.168.0.192:4050/hmi-assets/demo-p03a21.svg'),
     ).toBe(true);
     expect(isSvgAsset('/hmi-assets/page.svg?v=1')).toBe(true);
     expect(
