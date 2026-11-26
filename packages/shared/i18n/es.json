@@ -138,7 +138,7 @@
   "tour.operator.banner": "Modo de seguridad: normal permite mover; e_stop bloquea hasta reinicio; HOLD de hombre muerto al mantener. Reclame control y mantenga Enable para jogs P03A21.",
   "tour.operator.graphic": "Imagen de planta activa con etiquetas en vivo. El demo por defecto es el colgante P03A21.",
   "tour.operator.safePin": "STOP es un toque (sin PIN). El PIN de reinicio solo rearma tras STOP.",
-  "tour.operator.matrix": "Botones y selectores P03A21. Reclame control primero. Mantenga Enable para jogs. STOP queda abajo y no usa PIN.",
+  "tour.operator.matrix": "Botones y selectores P03A21. Reclame control primero. Mantenga Enable para jogs (en PC: clic para fijar, o mantenga Espacio). STOP queda abajo y no usa PIN.",
   "tour.operator.holdHint": "Mantenga los controles de movimiento; suelte para parar. En el teléfono, mantenga Enable con otro dedo para Listen o un jog.",
   "tour.media.camera": "Cámara del dispositivo para QR/código de barras. Dé permiso si está bloqueada.",
   "tour.media.qr": "Escriba o escanee el texto exacto (TP-P03A21 → Operador, TP-OPS → Ops). Resolve abre la ruta. Admins editan códigos en Config.",

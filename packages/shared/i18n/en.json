@@ -140,7 +140,7 @@
   "tour.operator.plantScreens": "Switch plant screens for this device. Admins Activate a shared default; Copy/Delete inactive screens in Config → Background.",
   "tour.operator.graphic": "Active plant picture with live labels from configured registers. Default demo is the P03A21 pendant layout.",
   "tour.operator.safePin": "STOP is one press (no PIN). Type Reset PIN here only to rearm e-stop after STOP.",
-  "tour.operator.matrix": "P03A21 buttons and rockers. Claim control first. Hold Enable for jog motion. STOP stays in the bottom dock and never needs the PIN.",
+  "tour.operator.matrix": "P03A21 buttons and rockers. Claim control first. Hold Enable for jog motion (on a PC: click Enable to latch, or hold Space). STOP stays in the bottom dock and never needs the PIN.",
   "tour.operator.jogSpeed": "Slow / Fast sets speed for variable-speed jogs while you hold a motion button.",
   "tour.operator.holdHint": "Press and hold motion controls; release to stop. Deadman pulses while held. On phone, hold Enable with another finger for Listen or a jog.",
   "tour.media.camera": "Device camera for QR/barcode in the frame. Grant permission if blocked. Plant RTSP notes are separate admin setup.",

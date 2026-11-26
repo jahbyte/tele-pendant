@@ -170,6 +170,14 @@ export function OperatorPage() {
   const minPulseTimersRef = useRef(new Map<string, number>());
   /** Pointer ids currently holding Enable (no capture — mic needs the pointer). */
   const enablePointersRef = useRef(new Set<number>());
+  /**
+   * PC mouse has one pointer, so Enable cannot be held with a jog at once.
+   * Click Enable to latch it; click again (or leave the page) to clear.
+   * Space also holds Enable while pressed.
+   */
+  const enableMouseLatchRef = useRef(false);
+  const enableSpaceHeldRef = useRef(false);
+  const enableCellRef = useRef<CellDto | null>(null);
   const [heldVersion, setHeldVersion] = useState(0);
   const bumpHolds = () => setHeldVersion((n) => n + 1);
   const [jogSpeed, setJogSpeed] = useState<'slow' | 'fast'>('fast');
@@ -764,6 +772,8 @@ export function OperatorPage() {
     // Header mic can take the mouse up while Enable stays asserted for Listen.
     if (cell.style === 'enable') {
       enablePointersRef.current.delete(pointerId);
+      // Mouse latch / Space keep Enable after the click or key is up.
+      if (enableMouseLatchRef.current || enableSpaceHeldRef.current) return;
       // A second finger on Enable must not drop it while the first is still down.
       if (enablePointersRef.current.size > 0) return;
       deferEnableRelease(() => {
@@ -785,7 +795,15 @@ export function OperatorPage() {
   }, []);
 
   useEffect(() => {
+    enableCellRef.current =
+      layoutQuery.data?.cells.find((cell) => cell.style === 'enable') ?? null;
+  }, [layoutQuery.data?.cells]);
+
+  useEffect(() => {
     const dropHeld = () => {
+      enableMouseLatchRef.current = false;
+      enableSpaceHeldRef.current = false;
+      enablePointersRef.current.clear();
       const held = [...holdsRef.current.values()];
       const waiting = [...releaseWaitingRef.current.entries()];
       if (
@@ -825,11 +843,47 @@ export function OperatorPage() {
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') dropHeld();
     };
+    const typingTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')
+        return true;
+      return target.isContentEditable;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' && event.key !== ' ') return;
+      if (event.repeat || typingTarget(event.target)) return;
+      const cell = enableCellRef.current;
+      if (!cell) return;
+      event.preventDefault();
+      if (enableSpaceHeldRef.current) return;
+      enableSpaceHeldRef.current = true;
+      if (!cellIsHeld(holdsRef.current, cell.id)) void pressCell(cell);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' && event.key !== ' ') return;
+      if (!enableSpaceHeldRef.current) return;
+      enableSpaceHeldRef.current = false;
+      event.preventDefault();
+      const cell = enableCellRef.current;
+      if (
+        !cell ||
+        enableMouseLatchRef.current ||
+        enablePointersRef.current.size > 0 ||
+        !cellIsHeld(holdsRef.current, cell.id)
+      ) {
+        return;
+      }
+      deferEnableRelease(() => {
+        void releaseCell(cell);
+      });
+    };
     // Enable skips pointer capture so the header mic can receive the click.
-    // Release that Enable pointer on window up (or keep it through Listen).
+    // Release that Enable pointer on window up (or keep it through Listen / latch).
     const onPointerUp = (event: PointerEvent) => {
       if (!enablePointersRef.current.has(event.pointerId)) return;
       enablePointersRef.current.delete(event.pointerId);
+      if (enableMouseLatchRef.current || enableSpaceHeldRef.current) return;
       // Keep Enable while another finger is still on it.
       if (enablePointersRef.current.size > 0) return;
       for (const hold of [...holdsRef.current.values()]) {
@@ -844,11 +898,17 @@ export function OperatorPage() {
     };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', dropHeld);
+    window.addEventListener('blur', dropHeld);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', dropHeld);
+      window.removeEventListener('blur', dropHeld);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
     };
@@ -1060,6 +1120,31 @@ export function OperatorPage() {
       return {
         onPointerDown: (event) => {
           if (isEnable) {
+            // Explicit mouse/pen: click latches Enable so the same pointer can jog.
+            const latchWithClick =
+              event.pointerType === 'mouse' || event.pointerType === 'pen';
+            if (latchWithClick) {
+              event.preventDefault();
+              if (needsLease && !youHold) {
+                commit();
+                return;
+              }
+              if (enableMouseLatchRef.current) {
+                enableMouseLatchRef.current = false;
+                enablePointersRef.current.delete(event.pointerId);
+                if (
+                  !enableSpaceHeldRef.current &&
+                  enablePointersRef.current.size === 0
+                ) {
+                  void releaseCell(cell);
+                }
+                return;
+              }
+              enableMouseLatchRef.current = true;
+              enablePointersRef.current.add(event.pointerId);
+              commit();
+              return;
+            }
             enablePointersRef.current.add(event.pointerId);
           }
           if (isTouchPointer(event.pointerType)) {
@@ -1305,7 +1390,17 @@ export function OperatorPage() {
             {...pointerHandlers()}
             onLostPointerCapture={() => releaseHeldPointer()}
             aria-label={cell.label}
-            aria-description={`${stateCode}: ${stateLabel}`}
+            aria-keyshortcuts={cell.style === 'enable' ? 'Space' : undefined}
+            aria-description={
+              cell.style === 'enable'
+                ? `${stateCode}: ${stateLabel}. On a PC, click to latch or hold Space, then use a jog.`
+                : `${stateCode}: ${stateLabel}`
+            }
+            title={
+              cell.style === 'enable'
+                ? `${cell.label} · click to latch or hold Space (PC)`
+                : `${cell.label} · ${stateCode}: ${stateLabel}`
+            }
           >
             {feedbackLamp}
           </Button>
@@ -1352,8 +1447,17 @@ export function OperatorPage() {
         {...pointerHandlers()}
         onLostPointerCapture={() => releaseHeldPointer()}
         aria-label={cell.label}
-        aria-description={`${stateCode}: ${stateLabel}`}
-        title={`${cell.label} · ${stateCode}: ${stateLabel}`}
+        aria-keyshortcuts={cell.style === 'enable' ? 'Space' : undefined}
+        aria-description={
+          cell.style === 'enable'
+            ? `${stateCode}: ${stateLabel}. On a PC, click to latch or hold Space, then use a jog.`
+            : `${stateCode}: ${stateLabel}`
+        }
+        title={
+          cell.style === 'enable'
+            ? `${cell.label} · click to latch or hold Space (PC)`
+            : `${cell.label} · ${stateCode}: ${stateLabel}`
+        }
       >
         <span className="matrix-cell-label">{cell.label}</span>
         {statusChip}

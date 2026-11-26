@@ -138,7 +138,7 @@
   "tour.operator.banner": "Sicherheitsmodus: normal = Bewegung; e_stop blockiert bis Reset; Totmann HOLD beim Halten. Steuerung beanspruchen und Enable für P03A21-Jogs halten.",
   "tour.operator.graphic": "Aktives Anlagenbild mit Live-Labels. Standard-Demo ist das P03A21-Pendant.",
   "tour.operator.safePin": "STOP ist ein Druck (ohne PIN). Reset-PIN setzt nur nach STOP zurück.",
-  "tour.operator.matrix": "P03A21-Tasten und Wippen. Zuerst Steuerung beanspruchen. Enable für Jogs halten. STOP unten, ohne PIN.",
+  "tour.operator.matrix": "P03A21-Tasten und Wippen. Zuerst Steuerung beanspruchen. Enable für Jogs halten (PC: Klick zum Einrasten oder Leertaste halten). STOP unten, ohne PIN.",
   "tour.operator.holdHint": "Bewegungstasten halten; Loslassen stoppt. Am Telefon Enable mit anderem Finger für Listen oder Jog halten.",
   "tour.media.camera": "Gerätekamera für QR/Barcode. Berechtigung erteilen, falls blockiert.",
   "tour.media.qr": "Exakten Text eingeben/scannen (TP-P03A21 → Operator, TP-OPS → Ops). Resolve öffnet die Route. Admins pflegen Codes in Config.",

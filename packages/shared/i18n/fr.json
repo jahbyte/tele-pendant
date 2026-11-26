@@ -138,7 +138,7 @@
   "tour.operator.banner": "Mode sécurité : normal = mouvement ; e_stop bloque jusqu’au reset ; HOLD homme mort pendant un maintien. Réclamez le contrôle et tenez Enable pour les jogs P03A21.",
   "tour.operator.graphic": "Image usine active avec étiquettes live. Le démo par défaut est le pendant P03A21.",
   "tour.operator.safePin": "STOP = une pression (sans PIN). Le PIN de reset ne sert qu’à réarmer après STOP.",
-  "tour.operator.matrix": "Boutons et bascules P03A21. Réclamez le contrôle d’abord. Tenez Enable pour jogger. STOP reste en bas sans PIN.",
+  "tour.operator.matrix": "Boutons et bascules P03A21. Réclamez le contrôle d’abord. Tenez Enable pour jogger (PC : clic pour verrouiller, ou maintenez Espace). STOP reste en bas sans PIN.",
   "tour.operator.holdHint": "Maintenez les commandes de mouvement ; relâchez pour arrêter. Sur téléphone, tenez Enable avec un autre doigt pour Listen ou un jog.",
   "tour.media.camera": "Caméra appareil pour QR/code-barres. Accordez la permission si bloquée.",
   "tour.media.qr": "Saisissez ou scannez le texte exact (TP-P03A21 → Operator, TP-OPS → Ops). Resolve ouvre la route. Les admins éditent les codes dans Config.",

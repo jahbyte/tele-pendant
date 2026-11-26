@@ -2906,6 +2906,298 @@ describe('OperatorPage', () => {
     );
   });
 
+  it('lets a PC mouse jog by latching Enable or holding Space', async () => {
+    const pendantLayout = {
+      ...layout,
+      matrix: { rows: 1, cols: 2 },
+      background: {
+        id: 'bg-p',
+        name: 'demo-p03a21',
+        cssBackground: 'gray',
+        imageUrl: null,
+      },
+      cells: [
+        {
+          id: 'en1',
+          row: 0,
+          col: 0,
+          label: 'Enable',
+          style: 'enable',
+          isMotion: false,
+          requiresSafeAction: false,
+          primaryRegister: {
+            id: 'pe',
+            name: 'coil.p03a21.di.enable',
+            address: 43,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+        {
+          id: 'home1',
+          row: 0,
+          col: 1,
+          label: 'Move Home Position',
+          style: 'pushbutton',
+          isMotion: true,
+          requiresSafeAction: false,
+          variableSpeed: false,
+          primaryRegister: {
+            id: 'ph',
+            name: 'coil.p03a21.di.moveHome',
+            address: 30,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+      ],
+    };
+    mockGetWithControl(pendantLayout);
+    mockPostWithControl(async () => ({ ok: true }));
+    renderOperator(<OperatorPage />);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    const enable = await screen.findByRole('button', { name: 'Enable' });
+    expect(enable).toHaveAttribute('aria-keyshortcuts', 'Space');
+    const home = screen.getByRole('button', { name: 'Move Home Position' });
+
+    // Click-latch Enable, then mouse the jog with the same pointer.
+    fireEvent.pointerDown(enable, { pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(enable, { pointerId: 1, pointerType: 'mouse' });
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
+    fireEvent.pointerDown(home, { pointerId: 2, pointerType: 'mouse' });
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/home1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    fireEvent.pointerUp(home, { pointerId: 2, pointerType: 'mouse' });
+    // Second Enable click clears the latch.
+    fireEvent.pointerDown(enable, { pointerId: 3, pointerType: 'mouse' });
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: false }),
+      ),
+    );
+
+    // Space holds Enable for a mouse jog without clicking Enable.
+    (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    // A second non-repeat Space down is ignored while already held.
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    fireEvent.pointerDown(home, { pointerId: 4, pointerType: 'mouse' });
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/home1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    fireEvent.pointerUp(home, { pointerId: 4, pointerType: 'mouse' });
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: false }),
+      ),
+    );
+
+    // Space in PIN / contenteditable must not latch Enable.
+    const pin = screen.getByLabelText(/reset pin|safe/i);
+    pin.focus();
+    pin.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    const editable = document.createElement('div');
+    editable.contentEditable = 'true';
+    document.body.appendChild(editable);
+    editable.focus();
+    editable.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    editable.remove();
+
+    // Non-Space keys are ignored by the Enable keyboard bridge.
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyA', key: 'a', bubbles: true }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'KeyA', key: 'a', bubbles: true }),
+    );
+    // Keyup with Space never held is a no-op.
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true }),
+    );
+
+    // Pen/mouse latch: window pointerup and Space up keep Enable while latched.
+    (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
+    fireEvent.pointerDown(enable, { pointerId: 5, pointerType: 'pen' });
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 5, bubbles: true }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      vi
+        .mocked(api.apiPost)
+        .mock.calls.some(
+          (call) =>
+            call[0] === '/hmi/cells/en1/activate' &&
+            (call[1] as { value?: boolean }).value === false,
+        ),
+    ).toBe(false);
+
+    // Second click while Space is held clears the latch but keeps Enable.
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    fireEvent.pointerDown(enable, { pointerId: 6, pointerType: 'mouse' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      vi
+        .mocked(api.apiPost)
+        .mock.calls.some(
+          (call) =>
+            call[0] === '/hmi/cells/en1/activate' &&
+            (call[1] as { value?: boolean }).value === false,
+        ),
+    ).toBe(false);
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true }),
+    );
+
+    window.dispatchEvent(new Event('blur'));
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: false }),
+      ),
+    );
+  });
+
+  it('ignores Space Enable when the layout has no Enable cell', async () => {
+    mockGetWithControl({
+      ...layout,
+      matrix: { rows: 1, cols: 1 },
+      cells: [
+        {
+          id: 'home1',
+          row: 0,
+          col: 0,
+          label: 'Move Home Position',
+          style: 'pushbutton',
+          isMotion: true,
+          requiresSafeAction: false,
+          variableSpeed: false,
+          primaryRegister: {
+            id: 'ph',
+            name: 'coil.p03a21.di.moveHome',
+            address: 30,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+      ],
+    });
+    mockPostWithControl(async () => ({ ok: true }));
+    renderOperator(<OperatorPage />);
+    await screen.findByRole('button', { name: 'Move Home Position' });
+    (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(api.apiPost).not.toHaveBeenCalled();
+  });
+
+  it('refuses mouse Enable latch when control is not claimed', async () => {
+    const pendantLayout = {
+      ...layout,
+      matrix: { rows: 1, cols: 1 },
+      cells: [
+        {
+          id: 'en1',
+          row: 0,
+          col: 0,
+          label: 'Enable',
+          style: 'enable',
+          isMotion: false,
+          requiresSafeAction: false,
+          primaryRegister: {
+            id: 'pe',
+            name: 'coil.p03a21.di.enable',
+            address: 43,
+            kind: 'coil',
+          },
+          feedbackRegister: null,
+          statusRegister: null,
+        },
+      ],
+    };
+    vi.spyOn(api, 'apiGet').mockImplementation(async (path: string) => {
+      if (path === '/safety/control') {
+        return {
+          held: false,
+          youHold: false,
+          holderUserId: null,
+          holderDisplayName: null,
+          expiresAt: null,
+        } as never;
+      }
+      return pendantLayout as never;
+    });
+    mockPostWithControl(async () => ({ ok: true }));
+    renderOperator(<OperatorPage />, { autoManage: false });
+    const enable = await screen.findByRole('button', { name: 'Enable' });
+    fireEvent.pointerDown(enable, { pointerId: 9, pointerType: 'mouse' });
+    expect(
+      await screen.findByText('Claim exclusive control before moving'),
+    ).toBeInTheDocument();
+    // Space with no lease sets the key flag but does not hold the coil.
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true }),
+    );
+  });
+
   it('keeps deadman while another jog is still held', async () => {
     const pendantLayout = {
       ...layout,
