@@ -196,7 +196,8 @@ export class MediaService implements OnModuleInit {
       return { ok: false, reason: 'command_not_allowlisted', transcript };
     }
 
-    const layout = await this.hmiService.getLayout();
+    // Use this device's selected Operator screen — not the admin default.
+    const layout = await this.hmiService.getLayout(clientId);
     const cell =
       (label === 'STOP' ? layout.stop : null) ??
       layout.cells.find((c) => c.label.toLowerCase() === label.toLowerCase()) ??

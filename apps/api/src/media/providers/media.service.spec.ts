@@ -526,6 +526,37 @@ describe('MediaService', () => {
     expect(result).toEqual(
       expect.objectContaining({ ok: false, reason: 'cell_not_found' }),
     );
+    expect(hmiService.getLayout).toHaveBeenCalledWith('device-1');
+  });
+
+  it('uses the phone screen layout so empty screens cannot run default buttons', async () => {
+    hmiService.getLayout.mockResolvedValueOnce({
+      cells: [],
+      stop: p03Cells.find((c) => c.label === 'STOP'),
+      background: { id: 'qa', name: 'QA Welder' },
+    });
+    const missing = await service.voiceCommand('open owff', {
+      role: UserRole.OPERATOR,
+      clientId: 'phone-qa',
+      userId: 'u1',
+    });
+    expect(hmiService.getLayout).toHaveBeenCalledWith('phone-qa');
+    expect(missing).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: 'cell_not_found',
+        label: 'OWFF Welding Flux Flap close/open',
+      }),
+    );
+    expect(hmiService.activateCell).not.toHaveBeenCalled();
+
+    // STOP stays available via the shared stop cell on any screen.
+    const stop = await service.voiceCommand('stop', {
+      role: UserRole.OPERATOR,
+      clientId: 'phone-qa',
+      userId: 'u1',
+    });
+    expect(stop).toEqual(expect.objectContaining({ ok: true, label: 'STOP' }));
   });
 
   it('uses shared layout.stop for voice STOP when cells omit it', async () => {
