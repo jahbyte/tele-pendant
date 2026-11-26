@@ -72,7 +72,18 @@ export function syncFingers(
 
   for (const [id, finger] of fingers) {
     if (seen.has(id)) continue;
-    if (finger.key) release.push(finger.key);
+    if (finger.key) {
+      // Two fingers on Enable: lifting one must not release while the other holds.
+      let heldByOther = false;
+      for (const [otherId, other] of fingers) {
+        if (otherId === id) continue;
+        if (seen.has(otherId) && other.key === finger.key) {
+          heldByOther = true;
+          break;
+        }
+      }
+      if (!heldByOther) release.push(finger.key);
+    }
     fingers.delete(id);
   }
 

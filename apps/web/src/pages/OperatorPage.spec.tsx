@@ -2618,6 +2618,53 @@ describe('OperatorPage', () => {
     fireEvent.pointerDown(enable);
     fireEvent.lostPointerCapture(enable);
     fireEvent.pointerUp(enable);
+
+    // Second finger on Enable must not drop it while the first is still down.
+    (api.apiPost as unknown as ReturnType<typeof vi.fn>).mockClear();
+    fireEvent.pointerDown(enable, { pointerId: 70 });
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: true }),
+      ),
+    );
+    fireEvent.pointerDown(enable, { pointerId: 71 });
+    // Element pointerup hits finishCellPointer; must keep Enable for finger 70.
+    fireEvent.pointerUp(enable, { pointerId: 71 });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(
+      vi
+        .mocked(api.apiPost)
+        .mock.calls.filter(
+          (call) =>
+            call[0] === '/hmi/cells/en1/activate' &&
+            (call[1] as { value?: boolean }).value === false,
+        ),
+    ).toHaveLength(0);
+    // Window path: another contact leaves while the first remains.
+    fireEvent.pointerDown(enable, { pointerId: 72 });
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 72, bubbles: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(
+      vi
+        .mocked(api.apiPost)
+        .mock.calls.filter(
+          (call) =>
+            call[0] === '/hmi/cells/en1/activate' &&
+            (call[1] as { value?: boolean }).value === false,
+        ),
+    ).toHaveLength(0);
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 70, bubbles: true }),
+    );
+    await waitFor(() =>
+      expect(api.apiPost).toHaveBeenCalledWith(
+        '/hmi/cells/en1/activate',
+        expect.objectContaining({ value: false }),
+      ),
+    );
     // Touch Enable uses a no-op capture so the mic finger stays free.
     vi.useFakeTimers();
     fireEvent.pointerDown(enable, {

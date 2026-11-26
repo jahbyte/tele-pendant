@@ -758,6 +758,8 @@ export function OperatorPage() {
     // Header mic can take the mouse up while Enable stays asserted for Listen.
     if (cell.style === 'enable') {
       enablePointersRef.current.delete(pointerId);
+      // A second finger on Enable must not drop it while the first is still down.
+      if (enablePointersRef.current.size > 0) return;
       deferEnableRelease(() => {
         void releaseCell(cell, direction);
       });
@@ -822,6 +824,8 @@ export function OperatorPage() {
     const onPointerUp = (event: PointerEvent) => {
       if (!enablePointersRef.current.has(event.pointerId)) return;
       enablePointersRef.current.delete(event.pointerId);
+      // Keep Enable while another finger is still on it.
+      if (enablePointersRef.current.size > 0) return;
       for (const hold of [...holdsRef.current.values()]) {
         const cell = layoutQuery.data?.cells.find(
           (row) => row.id === hold.cellId,

@@ -8,6 +8,24 @@ describe('syncFingers', () => {
     return null;
   };
 
+  it('keeps Enable held when a second finger taps Enable then lifts', () => {
+    const fingers = new Map<number, Finger>();
+    syncFingers(fingers, [{ id: 1, x: 10, y: 10 }], hit);
+    syncFingers(
+      fingers,
+      [
+        { id: 1, x: 10, y: 10 },
+        { id: 2, x: 12, y: 12 },
+      ],
+      hit,
+    );
+    const liftSecond = syncFingers(fingers, [{ id: 1, x: 10, y: 10 }], hit);
+    expect(liftSecond).toEqual({ press: [], release: [] });
+    expect(fingers.get(1)?.key).toBe('enable');
+    const liftFirst = syncFingers(fingers, [], hit);
+    expect(liftFirst).toEqual({ press: [], release: ['enable'] });
+  });
+
   it('keeps Enable held while a second finger presses a rocker', () => {
     const fingers = new Map<number, Finger>();
     const first = syncFingers(fingers, [{ id: 1, x: 10, y: 10 }], hit);
