@@ -17,6 +17,7 @@ export interface AssistantHit {
   snippet: string;
   path: string;
   score: number;
+  body?: string;
 }
 
 export interface AssistantSettings {
@@ -58,11 +59,37 @@ const FALLBACK_HANDBOOK = `Tele-Pendant advisory handbook: NxM cells with PLC re
 /**
  * Document assistant: SQLite FTS5 retrieval + optional Cursor Agent synthesis.
  */
+const SEED_LEXICON = [
+  'deadman',
+  'estop',
+  'enable',
+  'hoist',
+  'trolley',
+  'bridge',
+  'pendant',
+  'modbus',
+  'watchdog',
+  'alarm',
+  'shelve',
+  'acknowledge',
+  'speed',
+  'crane',
+  'latch',
+  'coil',
+  'holding',
+  'comms',
+  'simulator',
+  'register',
+  'safety',
+  'motion',
+] as const;
+
 @Injectable()
 export class AssistantService implements OnModuleInit {
   private readonly logger = new Logger(AssistantService.name);
   private db!: Database.Database;
   private readonly configService: ConfigService;
+  private lexicon = new Set<string>(SEED_LEXICON);
   /** Production uses the optional package. Tests can point this at a stub. */
   loadSdk: () => Promise<CursorSdk | null> = () => loadCursorSdk();
 
@@ -107,6 +134,8 @@ export class AssistantService implements OnModuleInit {
     const count = this.indexedCount();
     if (count === 0) {
       this.reindex();
+    } else {
+      this.refreshLexicon();
     }
   }
 
@@ -192,7 +221,27 @@ export class AssistantService implements OnModuleInit {
     this.logger.log(
       `Assistant FTS indexed ${indexed} documents from ${docsRoot || '(missing docs root)'}`,
     );
+    this.refreshLexicon();
     return { indexed };
+  }
+
+  private refreshLexicon(): void {
+    const next = new Set<string>(SEED_LEXICON);
+    try {
+      const rows = this.db.prepare('SELECT body FROM docs_fts').all() as Array<{
+        body: string;
+      }>;
+      for (const row of rows) {
+        for (const word of row.body
+          .toLowerCase()
+          .match(/[a-z][a-z0-9-]{3,}/g) || []) {
+          if (word.length <= 24) next.add(word);
+        }
+      }
+    } catch {
+      // Keep seed lexicon when the FTS table is unavailable.
+    }
+    this.lexicon = next;
   }
 
   private listMarkdownDocs(docsRoot: string | null): string[] {
@@ -214,6 +263,43 @@ export class AssistantService implements OnModuleInit {
     if (!q) return [];
     const safe = q.replace(/[^a-zA-Z0-9\s-]/g, ' ').trim();
     if (!safe) return [];
+    const tokens = this.searchTokens(safe);
+    const matchExpr =
+      tokens.length > 0
+        ? tokens.map((t) => `"${t}"`).join(' OR ')
+        : `"${safe.split(/\s+/)[0]}"`;
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT title, path, body,
+                  snippet(docs_fts, 1, '[', ']', '…', 64) AS snippet,
+                  bm25(docs_fts) AS score
+           FROM docs_fts
+           WHERE docs_fts MATCH ?
+           ORDER BY score
+           LIMIT ?`,
+        )
+        .all(matchExpr, limit) as Array<{
+        title: string;
+        path: string;
+        body: string;
+        snippet: string;
+        score: number;
+      }>;
+      return rows.map((r) => ({
+        title: r.title,
+        path: r.path,
+        body: r.body,
+        snippet: r.snippet,
+        score: r.score,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Stop-filtered query tokens with light spelling correction against the lexicon. */
+  private searchTokens(query: string): string[] {
     const stop = new Set([
       'how',
       'does',
@@ -239,49 +325,32 @@ export class AssistantService implements OnModuleInit {
       'me',
       'about',
     ]);
-    const tokens = safe
+    const raw = query
       .split(/\s+/)
       .map((t) => t.toLowerCase())
       .filter((t) => t.length > 2 && !stop.has(t));
-    const matchExpr =
-      tokens.length > 0
-        ? tokens.map((t) => `"${t}"`).join(' OR ')
-        : `"${safe.split(/\s+/)[0]}"`;
-    try {
-      const rows = this.db
-        .prepare(
-          `SELECT title, path, snippet(docs_fts, 1, '[', ']', '…', 24) AS snippet,
-                  bm25(docs_fts) AS score
-           FROM docs_fts
-           WHERE docs_fts MATCH ?
-           ORDER BY score
-           LIMIT ?`,
-        )
-        .all(matchExpr, limit) as Array<{
-        title: string;
-        path: string;
-        snippet: string;
-        score: number;
-      }>;
-      return rows.map((r) => ({
-        title: r.title,
-        path: r.path,
-        snippet: r.snippet,
-        score: r.score,
-      }));
-    } catch {
-      return [];
-    }
+    const corrected = raw.map((t) => correctToken(t, this.lexicon));
+    return [...new Set(corrected)];
   }
 
   async ask(question: string) {
     const hits = this.search(question, 5);
-    const manual =
-      hits.length === 0
-        ? `No manual paragraph matches this question: ${question}`
-        : `${question}\n\n${manualSentence(hits[0].snippet)}`;
+    const searched = this.searchTokens(
+      question.replace(/[^a-zA-Z0-9\s-]/g, ' '),
+    );
+    const tokens = searched.length > 0 ? searched : questionTokens(question);
+    const paragraph = answerFromHits(hits, tokens);
     const related = await this.relatedLive(question);
-    const ftsAnswer = related ? `${manual}\n\n${related}` : manual;
+    let ftsAnswer: string;
+    if (!paragraph) {
+      ftsAnswer = related
+        ? `${question}\n\n${related}`
+        : `No manual paragraph matches this question: ${question}`;
+    } else if (related) {
+      ftsAnswer = `${question}\n\n${related}\n\n${paragraph}`;
+    } else {
+      ftsAnswer = `${question}\n\n${paragraph}`;
+    }
     const ftsPayload = {
       question,
       answer: ftsAnswer,
@@ -506,12 +575,27 @@ export class AssistantService implements OnModuleInit {
   }
 }
 
+/** True when a line/snippet looks like a markdown table row, not prose. */
+export function isTableish(text: string): boolean {
+  const t = text
+    .replace(/[[\]…\u2026]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return false;
+  if (/^[-|:\s]+$/.test(t)) return true;
+  return (t.match(/\|/g) || []).length >= 2;
+}
+
 /**
- * One manual sentence from an FTS snippet: drop highlight brackets, markdown,
- * and leading ellipsis/replacement junk (e.g. "…The field is labeled **Reset PIN**.").
+ * Clean FTS/markdown noise then take up to `maxSentences` complete sentences
+ * (capped by `maxChars`) so answers are not cut mid-clause.
  */
-export function manualSentence(snippet: string): string {
-  const clean = snippet
+export function takeSentences(
+  text: string,
+  maxSentences = 2,
+  maxChars = 480,
+): string {
+  const clean = text
     .replace(/[[\]]/g, ' ')
     .replace(/\*{1,2}/g, '')
     .replace(/[_`#]/g, ' ')
@@ -522,9 +606,125 @@ export function manualSentence(snippet: string): string {
     .trim()
     .replace(/^[\s.*\-–—]+/, '')
     .trim();
-  const end = clean.search(/[.!?](?:\s|$)/);
-  if (end < 0) return clean;
+  if (!clean) return '';
+  let count = 0;
+  let end = -1;
+  for (let i = 0; i < clean.length; i += 1) {
+    const ch = clean[i];
+    if (ch !== '.' && ch !== '!' && ch !== '?') continue;
+    const next = i + 1 < clean.length ? clean[i + 1] : '';
+    if (next !== '' && !/\s/.test(next)) continue;
+    count += 1;
+    end = i;
+    if (count >= maxSentences || i + 1 >= maxChars) break;
+  }
+  if (end < 0) {
+    return clean.length <= maxChars
+      ? clean
+      : clean
+          .slice(0, maxChars)
+          .replace(/\s+\S*$/, '')
+          .trim();
+  }
   return clean.slice(0, end + 1).trim();
+}
+
+/**
+ * One manual sentence from an FTS snippet: drop highlight brackets, markdown,
+ * and leading ellipsis/replacement junk (e.g. "…The field is labeled **Reset PIN**.").
+ */
+export function manualSentence(snippet: string): string {
+  return takeSentences(snippet, 1);
+}
+
+/** Prefer a prose paragraph from the full doc body; skip markdown tables. */
+export function proseFromBody(body: string, tokens: string[]): string {
+  if (!body?.trim() || tokens.length === 0) return '';
+  const lowerTokens = tokens.map((t) => t.toLowerCase());
+  const paragraphs = body.split(/\n{2,}/);
+  for (const para of paragraphs) {
+    const lines = para.split('\n').filter((line) => !isTableish(line));
+    const text = lines.join(' ').replace(/\s+/g, ' ').trim();
+    if (text.length < 24 || isTableish(text)) continue;
+    const lower = text.toLowerCase();
+    if (!lowerTokens.some((t) => lower.includes(t))) continue;
+    return takeSentences(text, 2);
+  }
+  const kept: string[] = [];
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (kept.length > 0) break;
+      continue;
+    }
+    if (isTableish(trimmed)) continue;
+    const lower = trimmed.toLowerCase();
+    if (lowerTokens.some((t) => lower.includes(t)) || kept.length > 0) {
+      kept.push(trimmed);
+      if (kept.join(' ').length > 240) break;
+    }
+  }
+  const joined = kept.join(' ').replace(/\s+/g, ' ').trim();
+  if (joined.length < 24) return '';
+  return takeSentences(joined, 2);
+}
+
+/** Build the operator-facing manual paragraph from ranked FTS hits. */
+export function answerFromHits(
+  hits: Array<{ snippet: string; body?: string }>,
+  tokens: string[],
+): string {
+  for (const hit of hits) {
+    if (hit.body) {
+      const prose = proseFromBody(hit.body, tokens);
+      if (prose) return prose;
+    }
+  }
+  for (const hit of hits) {
+    if (isTableish(hit.snippet)) continue;
+    const sentence = takeSentences(hit.snippet, 2);
+    if (sentence) return sentence;
+  }
+  return '';
+}
+
+/** Levenshtein distance for short token spelling tolerance. */
+export function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const prev = new Array<number>(b.length + 1);
+  const cur = new Array<number>(b.length + 1);
+  for (let j = 0; j <= b.length; j += 1) prev[j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    cur[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j += 1) prev[j] = cur[j];
+  }
+  return prev[b.length];
+}
+
+/** Map a mistyped token onto the closest lexicon word when clearly close. */
+export function correctToken(token: string, lexicon: Iterable<string>): string {
+  const t = token.toLowerCase();
+  if (t.length < 4) return t;
+  const words = new Set<string>(lexicon);
+  if (words.has(t)) return t;
+  const maxD = t.length >= 7 ? 2 : 1;
+  let best = t;
+  let bestD = maxD + 1;
+  for (const word of words) {
+    if (Math.abs(word.length - t.length) > maxD) continue;
+    const d = editDistance(t, word);
+    if (d < bestD && d <= maxD) {
+      bestD = d;
+      best = word;
+    }
+  }
+  return best;
 }
 
 /** Skip filler so "the" cannot substring-match tag tokens like hoistHeightMm. */

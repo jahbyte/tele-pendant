@@ -1,10 +1,16 @@
 import {
   AssistantService,
+  answerFromHits,
+  correctToken,
+  editDistance,
+  isTableish,
   loadCursorSdk,
   manualSentence,
   nameTokens,
+  proseFromBody,
   questionTokens,
   sharesLiveToken,
+  takeSentences,
 } from './assistant.service';
 import {
   mkdtempSync,
@@ -245,6 +251,193 @@ describe('AssistantService', () => {
     ).toBe('The field is labeled Reset PIN.');
     expect(manualSentence('…The field is labeled **Reset PIN**.')).toBe(
       'The field is labeled Reset PIN.',
+    );
+  });
+
+  it('takes two full sentences and skips table snippets', () => {
+    expect(
+      takeSentences(
+        'Hold the deadman while jogging. Release stops motion. Extra.',
+        2,
+      ),
+    ).toBe('Hold the deadman while jogging. Release stops motion.');
+    expect(takeSentences('')).toBe('');
+    expect(takeSentences('no period but plenty of words here')).toBe(
+      'no period but plenty of words here',
+    );
+    expect(
+      takeSentences('word '.repeat(120).trim(), 2, 40).length,
+    ).toBeLessThanOrEqual(40);
+    expect(isTableish('| holding.speedPct | holding | 2 | 102 |')).toBe(true);
+    expect(isTableish('|---|---|')).toBe(true);
+    expect(isTableish('')).toBe(false);
+    expect(isTableish('Hold the deadman while jogging.')).toBe(false);
+    expect(proseFromBody('', ['speed'])).toBe('');
+    expect(proseFromBody('speed is fine here with enough words', [])).toBe('');
+    expect(
+      proseFromBody(
+        [
+          '| holding.speedPct | holding | 2 | 102 | Optional speed % |',
+          '',
+          'Optional speed percent is written to holding.speedPct during jog.',
+          'Operators set it from the pendant before motion.',
+        ].join('\n'),
+        ['speed'],
+      ),
+    ).toBe(
+      'Optional speed percent is written to holding.speedPct during jog. Operators set it from the pendant before motion.',
+    );
+    // Joined paragraph looks tableish (2+ pipes), but individual lines do not —
+    // forces the line-oriented fallback (including blank-line break).
+    expect(
+      proseFromBody(
+        [
+          'alpha | speed is mentioned with enough words here for keep',
+          'beta | more words to pad the length of this kept line',
+          '',
+          'gamma | ignored after the blank line break',
+        ].join('\n'),
+        ['speed'],
+      ),
+    ).toContain('speed is mentioned');
+    expect(
+      proseFromBody(['speed aa', '', 'speed bb'].join('\n'), ['speed']),
+    ).toBe('');
+    expect(
+      answerFromHits(
+        [
+          {
+            snippet:
+              '| holding.speedPct | holding | 2 | 102 | Optional speed % |',
+            body: '| holding.speedPct | holding | 2 | 102 | Optional speed % |\n',
+          },
+        ],
+        ['speed'],
+      ),
+    ).toBe('');
+    expect(
+      answerFromHits(
+        [
+          {
+            snippet: 'Hold the deadman while jogging. Release stops motion.',
+            body: '| a | b | c | deadman |\n',
+          },
+        ],
+        ['deadman'],
+      ),
+    ).toBe('Hold the deadman while jogging. Release stops motion.');
+  });
+
+  it('corrects short spelling mistakes against the lexicon', () => {
+    expect(editDistance('deadmn', 'deadman')).toBe(1);
+    expect(editDistance('', 'ab')).toBe(2);
+    expect(editDistance('ab', '')).toBe(2);
+    expect(editDistance('same', 'same')).toBe(0);
+    expect(correctToken('deadmn', ['deadman', 'estop'])).toBe('deadman');
+    expect(correctToken('deadman', ['deadman'])).toBe('deadman');
+    expect(correctToken('xyz', ['deadman'])).toBe('xyz');
+    expect(correctToken('deadmannn', ['deadman', 'deadmannx'])).toBe(
+      'deadmannx',
+    );
+  });
+
+  it('finds deadman guidance even with a typo', async () => {
+    const hits = service.search('deadmn');
+    expect(hits.length).toBeGreaterThan(0);
+    const result = await service.ask('How does deadmn work?');
+    expect(result.answer.toLowerCase()).toContain('deadman');
+  });
+
+  it('answers current speed with live tags, not a crane table row', async () => {
+    const live = new AssistantService(
+      configService as never,
+      { listActive: async () => [] } as never,
+      {
+        latest: () => ({
+          values: {
+            'holding.speedPct': 42,
+            'holding.hoistHeightMm': 1250,
+          },
+        }),
+      } as never,
+    );
+    live.onModuleInit();
+    const result = await live.ask('current speed');
+    expect(result.answer).toContain('holding.speedPct=42');
+    expect(result.answer).not.toContain('|');
+    expect(result.answer).not.toContain('holding.hoistHeightMm');
+  });
+
+  it('falls back to question tokens when search tokens are only stop words', async () => {
+    const result = await service.ask('how does the');
+    expect(result.answer).toContain('No manual paragraph matches');
+  });
+
+  it('covers lexicon edge cases and long line answer shaping', () => {
+    const edge = join(docsDir, 'lexicon-edge.md');
+    writeFileSync(
+      edge,
+      [
+        'a b c 12',
+        'supercalifragilisticexpialidocious',
+        'deadman hold tip extended for operators who need a long manual paragraph.',
+      ].join('\n\n'),
+    );
+    service.reindex();
+    expect(service.search('deadman').length).toBeGreaterThan(0);
+
+    const prepare = jest.spyOn(
+      (
+        service as unknown as {
+          db: { prepare: (sql: string) => unknown };
+        }
+      ).db,
+      'prepare',
+    );
+    prepare.mockImplementation(() => {
+      throw new Error('fts down');
+    });
+    (service as unknown as { refreshLexicon: () => void }).refreshLexicon();
+    prepare.mockRestore();
+    expect(correctToken('deadmn', ['deadman'])).toBe('deadman');
+
+    rmSync(edge, { force: true });
+    service.reindex();
+
+    expect(takeSentences('Done.')).toBe('Done.');
+    expect(takeSentences('Wait! Go on.')).toBe('Wait! Go on.');
+    expect(takeSentences('A. B. C. D.', 2, 5)).toBe('A. B.');
+    expect(
+      proseFromBody(
+        [
+          'unrelated long paragraph about bridges without the token word present',
+          '',
+          'alpha | speed short enough here now',
+          'beta | continuation without key token',
+        ].join('\n'),
+        ['speed'],
+      ),
+    ).toContain('continuation without key');
+    expect(
+      proseFromBody(
+        [
+          'unrelated long paragraph about bridges without the token word present',
+          '',
+          'alpha | speed ' + 'pad'.repeat(40),
+          'beta | ' + 'pad'.repeat(80),
+        ].join('\n'),
+        ['speed'],
+      ),
+    ).toContain('speed');
+    expect(
+      answerFromHits(
+        [{ snippet: 'Hold the deadman while jogging.' }],
+        ['deadman'],
+      ),
+    ).toBe('Hold the deadman while jogging.');
+    expect(answerFromHits([{ snippet: '…' }], ['deadman'])).toBe('');
+    expect(answerFromHits([{ snippet: '   ', body: '' }], ['deadman'])).toBe(
+      '',
     );
   });
 
