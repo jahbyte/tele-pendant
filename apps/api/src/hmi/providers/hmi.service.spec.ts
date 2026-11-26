@@ -96,6 +96,7 @@ describe('HmiService', () => {
     noteEnableCleared: jest.fn(),
     noteCommandHoldAsserted: jest.fn(),
     noteCommandHoldCleared: jest.fn(),
+    releaseDeadman: jest.fn().mockResolvedValue({ deadmanActive: false }),
     isEnableHeld: jest.fn().mockReturnValue(true),
     getRoles: jest.fn().mockResolvedValue({
       eStopRegisterId: 'estop-id',
@@ -1047,18 +1048,28 @@ describe('HmiService', () => {
   it('updates a register address and drops the address cache', async () => {
     registers.findOneBy.mockResolvedValue({
       id: 'r1',
-      name: 'coil.hoistUp',
+      name: 'coil.lamp',
+      kind: 'coil',
       address: 0,
     });
+    cells.find.mockResolvedValue([]);
+    cells.findOne.mockResolvedValue(null);
     const saved = await service.updateRegister('r1', 20);
     expect(saved.address).toBe(20);
+    expect(plcService.writeCoil).toHaveBeenCalledWith(0, false);
     expect(plcService.forgetAddresses).toHaveBeenCalled();
     expect(auditService.write).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'register.update',
-        details: 'coil.hoistUp=20',
+        details: 'coil.lamp=20',
       }),
     );
+    registers.findOneBy.mockResolvedValue({
+      id: 'r1',
+      name: 'coil.lamp',
+      kind: 'coil',
+      address: 20,
+    });
     const tagged = await service.updateRegister(
       'r1',
       21,
@@ -1067,6 +1078,12 @@ describe('HmiService', () => {
     );
     expect(tagged.nodeId).toBe('ns=1;s=Hoist');
     expect(tagged.trended).toBe(true);
+    registers.findOneBy.mockResolvedValue({
+      id: 'r1',
+      name: 'coil.lamp',
+      kind: 'coil',
+      address: 21,
+    });
     const cleared = await service.updateRegister(
       'r1',
       21,
@@ -1074,22 +1091,79 @@ describe('HmiService', () => {
       { nodeId: '  ', trended: false },
     );
     expect(cleared.nodeId).toBeNull();
+    registers.findOneBy.mockResolvedValue({
+      id: 'r1',
+      name: 'coil.lamp',
+      kind: 'coil',
+      address: 21,
+    });
     const untouched = await service.updateRegister('r1', 22, undefined, {
       nodeId: null,
     });
     expect(untouched.nodeId).toBeNull();
+    registers.findOneBy.mockResolvedValue({
+      id: 'r1',
+      name: 'coil.lamp',
+      kind: 'coil',
+      address: 22,
+    });
     const trendOnly = await service.updateRegister('r1', 23, undefined, {
       trended: true,
     });
     expect(trendOnly.address).toBe(23);
   });
 
+  it('clears the old coil and requires PIN when retargeting a motion register', async () => {
+    registers.findOneBy.mockResolvedValue({
+      id: 'r1',
+      name: 'coil.hoistUp',
+      kind: 'coil',
+      address: 0,
+    });
+    cells.find.mockResolvedValue([motionCell]);
+    await expect(
+      service.updateRegister('r1', 20, { userId: 'u1' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+    expect(registers.save).not.toHaveBeenCalled();
+
+    await service.updateRegister('r1', 20, { userId: 'u1' }, { pin: '1234' });
+    expect(plcService.writeCoil).toHaveBeenCalledWith(0, false);
+    expect(safetyState.noteMotionCoilCleared).toHaveBeenCalledWith(0);
+    expect(registers.save).toHaveBeenCalled();
+
+    plcService.writeCoil.mockRejectedValueOnce(new Error('bus down'));
+    registers.findOneBy.mockResolvedValue({
+      id: 'r1',
+      name: 'coil.hoistUp',
+      kind: 'coil',
+      address: 20,
+    });
+    await expect(
+      service.updateRegister('r1', 21, { userId: 'u1' }, { pin: '1234' }),
+    ).rejects.toThrow(/Could not clear coil 20/);
+    expect(registers.save).toHaveBeenCalledTimes(1);
+
+    plcService.writeCoil.mockRejectedValueOnce('link down');
+    registers.findOneBy.mockResolvedValue({
+      id: 'r1',
+      name: 'coil.hoistUp',
+      kind: 'coil',
+      address: 20,
+    });
+    await expect(
+      service.updateRegister('r1', 21, { userId: 'u1' }, { pin: '1234' }),
+    ).rejects.toThrow(/Could not clear coil 20 before address change$/);
+  });
+
   it('requires PIN to change a safety register address (TP-48)', async () => {
     registers.findOneBy.mockResolvedValue({
       id: 'estop-id',
       name: 'coil.eStop',
+      kind: 'coil',
       address: 11,
     });
+    cells.find.mockResolvedValue([]);
     await expect(
       service.updateRegister(
         'estop-id',
@@ -1108,6 +1182,7 @@ describe('HmiService', () => {
     registers.findOneBy.mockResolvedValue({
       id: 'estop-id',
       name: 'coil.eStop',
+      kind: 'coil',
       address: 11,
     });
     const saved = await service.updateRegister(
@@ -1116,11 +1191,13 @@ describe('HmiService', () => {
       { userId: 'u1' },
       { pin: '1234' },
     );
+    expect(plcService.writeCoil).toHaveBeenCalledWith(11, false);
     expect(saved.address).toBe(99);
 
     registers.findOneBy.mockResolvedValue({
       id: 'custom-bound',
       name: 'coil.other',
+      kind: 'coil',
       address: 5,
     });
     for (const key of [
@@ -1144,9 +1221,11 @@ describe('HmiService', () => {
     registers.findOneBy.mockResolvedValue({
       id: 'estop-id',
       name: 'coil.eStop',
+      kind: 'coil',
       address: 11,
     });
     safeActionPin.verify.mockClear();
+    plcService.writeCoil.mockClear();
     await service.updateRegister(
       'estop-id',
       11,
@@ -1154,6 +1233,7 @@ describe('HmiService', () => {
       { trended: true },
     );
     expect(safeActionPin.verify).not.toHaveBeenCalled();
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
   });
 
   it('rejects a missing register and an address outside 0..65535', async () => {
@@ -1315,6 +1395,12 @@ describe('HmiService', () => {
     await service.writeGuardedCoil(12, false, { userId: 'u1', pin: '1234' });
     expect(safetyState.resetEStop).toHaveBeenCalled();
 
+    safetyState.getRoles.mockResolvedValue({
+      eStopRegisterId: null,
+      deadmanRegisterId: null,
+      heartbeatRegisterId: null,
+      safeStateRegisterId: null,
+    });
     registers.findOneBy.mockResolvedValue({
       name: 'coil.eStop',
       kind: 'coil',
@@ -1327,16 +1413,11 @@ describe('HmiService', () => {
     );
     expect(plcService.writeCoil).toHaveBeenCalledWith(11, true);
 
-    safetyState.getRoles.mockResolvedValueOnce({
-      eStopRegisterId: null,
-      deadmanRegisterId: null,
-      heartbeatRegisterId: null,
-      safeStateRegisterId: null,
-    });
     registers.findOneBy.mockResolvedValue(null);
     await service.writeGuardedCoil(99, true, { userId: 'u1' });
     expect(plcService.writeCoil).toHaveBeenCalledWith(99, true);
   });
+
 
   it('blocks raw writeGuardedCoil to a motion address with no matching cell', async () => {
     // Unfiltered find → no owner cell; isMotion find → coil 26 is still motion.
@@ -1400,16 +1481,25 @@ describe('HmiService', () => {
     registers.findOneBy.mockResolvedValue({
       id: 'en',
       name: 'coil.p03a21.di.enable',
+      kind: 'coil',
       address: 43,
     });
+    cells.find.mockResolvedValue([]);
     await expect(
       service.updateRegister('en', 44, { userId: 'u1' }, { pin: 'nope' }),
     ).rejects.toThrow(/PIN does not match/);
     expect(registers.save).not.toHaveBeenCalled();
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+
+    await service.updateRegister('en', 44, { userId: 'u1' }, { pin: '1234' });
+    expect(plcService.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(safetyState.noteEnableCleared).toHaveBeenCalled();
+    expect(registers.save).toHaveBeenCalled();
 
     registers.findOneBy.mockResolvedValue({
       id: 'custom-en',
       name: 'coil.customEnable',
+      kind: 'coil',
       address: 43,
     });
     cells.findOne.mockResolvedValue({
@@ -1424,7 +1514,23 @@ describe('HmiService', () => {
       style: 'enable',
       primaryRegister: { id: 'other' },
     });
+    cells.find.mockResolvedValue([]);
+    plcService.writeCoil.mockClear();
+    registers.save.mockClear();
     await service.updateRegister('custom-en', 44, { userId: 'u1' });
+    expect(plcService.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(registers.save).toHaveBeenCalled();
+
+    // Non-coil maps do not need a PIN or a coil clear.
+    registers.findOneBy.mockResolvedValue({
+      id: 'h1',
+      name: 'holding.metric',
+      kind: 'holding',
+      address: 8,
+    });
+    plcService.writeCoil.mockClear();
+    await service.updateRegister('h1', 9, { userId: 'u1' });
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
     expect(registers.save).toHaveBeenCalled();
 
     cells.findOne.mockResolvedValue({

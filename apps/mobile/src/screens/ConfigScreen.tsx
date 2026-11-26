@@ -143,6 +143,31 @@ function isSafetyRegisterName(name: string): boolean {
   return SAFETY_REGISTER_NAMES.has(name);
 }
 
+function registerAddressNeedsPin(
+  row: { id: string; name: string },
+  cells: Array<{
+    isMotion?: boolean;
+    style?: string;
+    primaryRegister?: { id: string } | null;
+    secondaryRegister?: { id: string } | null;
+  }>,
+): boolean {
+  if (isSafetyRegisterName(row.name)) return true;
+  for (const cell of cells) {
+    if (cell.style === 'enable' && cell.primaryRegister?.id === row.id) {
+      return true;
+    }
+    if (
+      cell.isMotion &&
+      (cell.primaryRegister?.id === row.id ||
+        cell.secondaryRegister?.id === row.id)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function registerOptions(registers: RegisterRef[]) {
   return registers.map((row) => ({ value: row.id, label: row.name }));
 }
@@ -323,7 +348,7 @@ export function ConfigScreen({ token }: { token: string }) {
             <RegisterForm
               key={row.id}
               row={row}
-              safetyCritical={isSafetyRegisterName(row.name)}
+              safetyCritical={registerAddressNeedsPin(row, layout?.cells ?? [])}
               note={notes[row.id]}
               onSave={async (value) => {
                 try {
@@ -1107,12 +1132,13 @@ function RegisterForm({
   return (
     <>
       <Text className="mb-1 mt-2 text-muted-foreground">
-        {row.name} ({row.kind}){safetyCritical ? ' — Safety' : ''}
+        {row.name} ({row.kind}){safetyCritical ? ' — Protected' : ''}
       </Text>
       {safetyCritical ? (
         <Text className="mb-2 text-xs text-muted-foreground">
-          Changing this address retargets e-stop/deadman/heartbeat/safe-state.
-          Reset PIN required when the address changes.
+          Changing this address retargets e-stop/deadman/heartbeat/safe-state,
+          Enable, or a motion coil. Reset PIN required when the address changes.
+          The previous coil is cleared first.
         </Text>
       ) : null}
       <Field label="Address" value={address} onChangeText={setAddress} />
@@ -1146,7 +1172,7 @@ function RegisterForm({
           if (safetyCritical && addressChanged && !pin.trim()) {
             showErrorFrom(
               new Error(
-                'Reset PIN is required to change a safety register address',
+                'Reset PIN is required to change a safety or motion register address',
               ),
               'Save failed',
             );

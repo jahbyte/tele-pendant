@@ -425,10 +425,10 @@ export class HmiService {
     if (!row) throw new NotFoundException('Register not found');
 
     const addressChanging = row.address !== address;
-    if (
+    const needsPin =
       addressChanging &&
-      (await this.addressChangeNeedsPin(row.id, row.name))
-    ) {
+      (await this.addressChangeNeedsPin(row.id, row.name, row.kind));
+    if (needsPin) {
       const ok = await this.safeActionPin.verify(
         actor?.userId,
         extra?.pin ?? '',
@@ -438,11 +438,36 @@ export class HmiService {
           ...this.actorFields(actor),
           action: 'register.update_denied',
           resource: row.name,
-          details: `${row.name} address change blocked (safety register)`,
+          details: `${row.name} address change blocked (protected register)`,
           result: 'failure',
         });
         throw new ForbiddenException(
-          'PIN does not match — required to change a safety register address',
+          'PIN does not match — required to change a safety or motion register address',
+        );
+      }
+    }
+
+    // Drop the old coil before retargeting so a held jog cannot stay ON forever.
+    if (addressChanging && row.kind === 'coil') {
+      const previous = row.address;
+      try {
+        await this.plcService.writeCoil(previous, false);
+        this.safetyState.noteMotionCoilCleared(previous);
+        if (await this.isEnableRegister(row.id, row.name)) {
+          this.safetyState.noteEnableCleared();
+        }
+      } catch (err) {
+        await this.auditService.write({
+          ...this.actorFields(actor),
+          action: 'register.update_denied',
+          resource: row.name,
+          details: `${row.name} address change blocked — could not clear coil ${previous}`,
+          result: 'failure',
+        });
+        throw new BadRequestException(
+          err instanceof Error
+            ? `Could not clear coil ${previous} before address change: ${err.message}`
+            : `Could not clear coil ${previous} before address change`,
         );
       }
     }
@@ -467,13 +492,23 @@ export class HmiService {
   }
 
   /**
-   * Safety maps, plus the Enable coil. Moving Enable makes jogs skip the hold check.
+   * Safety maps, Enable, and motion jog coils. Retargeting any of these while
+   * live must require the reset PIN.
    */
   private async addressChangeNeedsPin(
     id: string,
     name: string,
+    kind?: string,
   ): Promise<boolean> {
     if (await this.isSafetyRegister(id, name)) return true;
+    if (await this.isEnableRegister(id, name)) return true;
+    if (kind === 'coil') {
+      return this.registerIsMotionCoil({ id, name, kind: 'coil' });
+    }
+    return false;
+  }
+
+  private async isEnableRegister(id: string, name: string): Promise<boolean> {
     if (name === pendantDiName('enable')) return true;
     const enableCell = await this.cells.findOne({
       where: { style: 'enable' },
@@ -916,6 +951,7 @@ export class HmiService {
     const bound = await this.registers.findOneBy({ id: roles.eStopRegisterId });
     return bound?.kind === 'coil' && bound.address === address;
   }
+
 
   /** FEAT-A2: write holding.speedPct for slow/fast jog (0 clears). */
   private async writeJogSpeedPct(

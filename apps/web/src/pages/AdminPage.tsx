@@ -153,6 +153,33 @@ function isSafetyRegister(
   );
 }
 
+/** Safety, Enable, or a motion/jog coil — address changes need the reset PIN. */
+function registerAddressNeedsPin(
+  row: { id: string; name: string },
+  roles: SafetyRoleRow | null | undefined,
+  cells: Array<{
+    isMotion?: boolean;
+    style?: string;
+    primaryRegister?: { id: string } | null;
+    secondaryRegister?: { id: string } | null;
+  }>,
+): boolean {
+  if (isSafetyRegister(row, roles)) return true;
+  for (const cell of cells) {
+    if (cell.style === 'enable' && cell.primaryRegister?.id === row.id) {
+      return true;
+    }
+    if (
+      cell.isMotion &&
+      (cell.primaryRegister?.id === row.id ||
+        cell.secondaryRegister?.id === row.id)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 interface Note {
   ok: boolean;
   text: string;
@@ -485,7 +512,11 @@ export function AdminPage() {
                   address={row.address}
                   trended={Boolean(row.trended)}
                   nodeId={row.nodeId ?? ''}
-                  safetyCritical={isSafetyRegister(row, safetyRoles.data)}
+                  safetyCritical={registerAddressNeedsPin(
+                    row,
+                    safetyRoles.data,
+                    cells,
+                  )}
                   showNode={plcRows.some((item) => item.protocol === 'opcua')}
                   note={notes[row.id]}
                   onNote={(note) => remember(row.id, note)}
@@ -1491,7 +1522,7 @@ function RegisterEditor({
     if (safetyCritical && addressChanged && !pin.trim()) {
       const failure = {
         ok: false as const,
-        text: 'Reset PIN is required to change a safety register address',
+        text: 'Reset PIN is required to change a safety or motion register address',
       };
       onNote(failure);
       toastErr(failure.text);
@@ -1523,13 +1554,14 @@ function RegisterEditor({
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">{name}</span>
         <Badge variant="outline">{kind}</Badge>
-        {safetyCritical ? <Badge variant="destructive">Safety</Badge> : null}
+        {safetyCritical ? <Badge variant="destructive">Protected</Badge> : null}
       </div>
       {safetyCritical ? (
         <p className="text-xs text-muted-foreground">
           Changing this address retargets e-stop, deadman, heartbeat,
-          safe-state, or Enable. A reset PIN is required when the address
-          changes.
+          safe-state, Enable, or a motion coil. A reset PIN is required when the
+          address changes. The previous coil is cleared first so a held jog
+          cannot stay ON.
         </p>
       ) : null}
       <div className="grid gap-4 sm:grid-cols-2">

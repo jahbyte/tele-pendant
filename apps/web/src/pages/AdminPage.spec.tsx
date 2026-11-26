@@ -379,11 +379,15 @@ describe('AdminPage', () => {
     fireEvent.change(screen.getByLabelText('coil.up address'), {
       target: { value: '11' },
     });
+    fireEvent.change(screen.getByLabelText('coil.up reset pin'), {
+      target: { value: '1234' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Save coil.up' }));
     await screen.findByText('Saved coil.up.');
     expect(patch).toHaveBeenCalledWith('/hmi/registers/r1', {
       address: 11,
       trended: false,
+      pin: '1234',
     });
 
     fireEvent.change(screen.getByLabelText('new label'), {
@@ -851,6 +855,26 @@ describe('AdminPage', () => {
       }
       return {
         ...layout,
+        cells: [
+          ...layout.cells,
+          {
+            id: 'en1',
+            row: 0,
+            col: 1,
+            label: 'Enable',
+            style: 'enable',
+            isMotion: false,
+            requiresSafeAction: false,
+            primaryRegister: {
+              id: 'custom-en',
+              name: 'coil.customEnable',
+              address: 43,
+              kind: 'coil',
+            },
+            feedbackRegister: null,
+            statusRegister: null,
+          },
+        ],
         registers: [
           ...layout.registers,
           {
@@ -866,12 +890,19 @@ describe('AdminPage', () => {
             address: 7,
             kind: 'coil',
           },
+          {
+            id: 'custom-en',
+            name: 'coil.customEnable',
+            address: 43,
+            kind: 'coil',
+            trended: false,
+          },
         ],
       };
     });
     const patch = vi.spyOn(api, 'apiPatch').mockResolvedValue({});
     await goConfigSection('Register maps');
-    expect(screen.getAllByText('Safety').length).toBeGreaterThanOrEqual(5);
+    expect(screen.getAllByText('Protected').length).toBeGreaterThanOrEqual(5);
     expect(
       screen.getAllByText(/Changing this address retargets/).length,
     ).toBeGreaterThanOrEqual(1);
@@ -890,7 +921,7 @@ describe('AdminPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save coil.eStop' }));
     expect(
       await screen.findByText(
-        'Reset PIN is required to change a safety register address',
+        'Reset PIN is required to change a safety or motion register address',
       ),
     ).toBeInTheDocument();
     expect(patch).not.toHaveBeenCalled();
@@ -906,9 +937,16 @@ describe('AdminPage', () => {
       pin: '1234',
     });
 
+    // Motion jog coil (layout cell isMotion) also requires PIN on address change.
     fireEvent.change(screen.getByLabelText('coil.up address'), {
       target: { value: '42' },
     });
+    fireEvent.click(screen.getByRole('button', { name: 'Save coil.up' }));
+    expect(
+      await screen.findByText(
+        'Reset PIN is required to change a safety or motion register address',
+      ),
+    ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('coil.up reset pin'), {
       target: { value: '1234' },
     });
@@ -917,6 +955,30 @@ describe('AdminPage', () => {
     expect(patch).toHaveBeenCalledWith(
       '/hmi/registers/r1',
       expect.objectContaining({ address: 42, pin: '1234' }),
+    );
+
+    // Enable cell binding (not a fixed safety name) also requires PIN.
+    fireEvent.change(screen.getByLabelText('coil.customEnable address'), {
+      target: { value: '55' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save coil.customEnable' }),
+    );
+    expect(
+      await screen.findByText(
+        'Reset PIN is required to change a safety or motion register address',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('coil.customEnable reset pin'), {
+      target: { value: '1234' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save coil.customEnable' }),
+    );
+    await screen.findByText('Saved coil.customEnable.');
+    expect(patch).toHaveBeenCalledWith(
+      '/hmi/registers/custom-en',
+      expect.objectContaining({ address: 55, pin: '1234' }),
     );
   });
 
