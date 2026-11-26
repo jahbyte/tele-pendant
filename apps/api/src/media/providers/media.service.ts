@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { cellUsesHoldToRun, isOperatorStopCell } from '@tele-pendant/shared';
 import { AuditService } from '../../audit/providers/audit.service';
 import { HmiService } from '../../hmi/providers/hmi.service';
 import { SafetyStateService } from '../../safety/providers/safety-state.service';
@@ -15,7 +16,7 @@ import { UserRole } from '../../users/enums/user-role.enum';
 import { ScanCode } from '../entities/scan-code.entity';
 import { matchVoiceCommand } from './voice-match';
 
-/** How long a spoken motion command stays asserted. */
+/** How long a spoken hold-to-run command stays asserted. */
 const VOICE_JOG_MS = 2500;
 const VOICE_JOG_PULSE_MS = 400;
 
@@ -25,7 +26,8 @@ export class MediaService implements OnModuleInit {
   private readonly hmiService: HmiService;
   private readonly safetyState: SafetyStateService;
   private readonly auditService: AuditService;
-  private motionJog: ReturnType<typeof setInterval> | null = null;
+  private voicePulse: ReturnType<typeof setInterval> | null = null;
+  private voicePulseCellId: string | null = null;
 
   constructor(
     @InjectRepository(ScanCode)
@@ -218,19 +220,32 @@ export class MediaService implements OnModuleInit {
             'Claim exclusive control, hold Enable on Operator, and keep Listen active (or a deadman hold) before timed voice motion.',
         };
       }
-      this.beginMotionJog(cell.id);
     }
 
-    await this.hmiService.activateCell(cell.id, true, {
-      userId: opts.userId,
-      userEmail: opts.userEmail,
-      userDisplayName: opts.userDisplayName,
-      role: opts.role,
-      safeActionPin: opts.safeActionPin,
-      ip: opts.ip,
-      clientId,
-      direction,
-    });
+    // Enable is already held for Listen — do not pulse ON/OFF and fight the hold.
+    const enableAlreadyHeld =
+      cell.style === 'enable' && this.safetyState.isEnableHeld();
+    const needsVoicePulse =
+      !enableAlreadyHeld &&
+      !isOperatorStopCell(cell) &&
+      cellUsesHoldToRun(cell);
+
+    if (!enableAlreadyHeld) {
+      await this.hmiService.activateCell(cell.id, true, {
+        userId: opts.userId,
+        userEmail: opts.userEmail,
+        userDisplayName: opts.userDisplayName,
+        role: opts.role,
+        safeActionPin: opts.safeActionPin,
+        ip: opts.ip,
+        clientId,
+        direction,
+      });
+    }
+
+    if (needsVoicePulse) {
+      this.beginVoicePulse(cell.id);
+    }
 
     await this.auditService.write({
       userId: opts.userId,
@@ -255,32 +270,48 @@ export class MediaService implements OnModuleInit {
     };
   }
 
-  /** Drop the motion coil after a short jog; client keeps deadman hold (TP-29). */
-  private beginMotionJog(cellId: string): void {
-    this.endMotionJog(null);
+  /**
+   * Assert then clear hold-to-run coils (jog, Teach, Seam, Enable, …).
+   * Clears any prior voice pulse so a second phrase cannot leave the first ON.
+   */
+  private beginVoicePulse(cellId: string): void {
+    const previous = this.voicePulseCellId;
+    if (this.voicePulse) {
+      clearInterval(this.voicePulse);
+      this.voicePulse = null;
+    }
+    if (previous && previous !== cellId) {
+      void this.clearVoiceCell(previous);
+    }
+    this.voicePulseCellId = cellId;
     const started = Date.now();
-    this.motionJog = setInterval(() => {
+    this.voicePulse = setInterval(() => {
       if (Date.now() - started >= VOICE_JOG_MS) {
-        this.endMotionJog(cellId);
+        this.endVoicePulse(cellId);
       }
     }, VOICE_JOG_PULSE_MS);
-    this.motionJog.unref();
+    this.voicePulse.unref();
   }
 
-  private endMotionJog(cellId: string | null): void {
-    if (this.motionJog) {
-      clearInterval(this.motionJog);
-      this.motionJog = null;
+  private endVoicePulse(cellId: string): void {
+    // A newer phrase may have replaced this pulse — still drop this coil only.
+    if (this.voicePulseCellId !== cellId) {
+      void this.clearVoiceCell(cellId);
+      return;
     }
-    if (!cellId) return;
-    void this.clearMotionCoil(cellId);
+    if (this.voicePulse) {
+      clearInterval(this.voicePulse);
+      this.voicePulse = null;
+    }
+    this.voicePulseCellId = null;
+    void this.clearVoiceCell(cellId);
   }
 
-  private async clearMotionCoil(cellId: string): Promise<void> {
+  private async clearVoiceCell(cellId: string): Promise<void> {
     try {
       await this.hmiService.activateCell(cellId, false, {});
     } catch {
-      // Client deadman release / safety tick still clears motion coils.
+      // Safety tick / Enable·command watchdogs still clear stuck coils.
     }
   }
 

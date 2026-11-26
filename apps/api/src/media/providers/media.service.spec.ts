@@ -20,20 +20,51 @@ describe('MediaService', () => {
     {
       id: 'owva',
       label: 'OWVA up/down',
+      style: 'selector',
       isMotion: true,
       requiresSafeAction: false,
     },
     {
       id: 'owha',
       label: 'OWHA backw./forw.',
+      style: 'selector',
       isMotion: true,
       requiresSafeAction: false,
     },
     {
       id: 'stop',
       label: 'STOP',
+      style: 'estop',
       isMotion: false,
       requiresSafeAction: true,
+    },
+    {
+      id: 'enable',
+      label: 'Enable',
+      style: 'enable',
+      isMotion: false,
+      requiresSafeAction: false,
+    },
+    {
+      id: 'seam',
+      label: 'Seam Tracking on/off',
+      style: 'pushbutton',
+      isMotion: false,
+      requiresSafeAction: false,
+    },
+    {
+      id: 'teach-pipe',
+      label: 'Teach Pipe Middle Position',
+      style: 'pushbutton',
+      isMotion: false,
+      requiresSafeAction: false,
+    },
+    {
+      id: 'axis',
+      label: 'Axis fast/slowly',
+      style: 'pushbutton',
+      isMotion: false,
+      requiresSafeAction: false,
     },
   ];
   const hmiService = {
@@ -45,6 +76,7 @@ describe('MediaService', () => {
     releaseDeadman: jest.fn(),
     allowTimedMediaMotion: jest.fn().mockResolvedValue(true),
     canIssueMotion: jest.fn().mockReturnValue(true),
+    isEnableHeld: jest.fn().mockReturnValue(false),
   };
   const auditService = { write: jest.fn().mockResolvedValue({}) };
 
@@ -57,6 +89,7 @@ describe('MediaService', () => {
     hmiService.getLayout.mockResolvedValue({ cells: p03Cells });
     safetyState.allowTimedMediaMotion.mockResolvedValue(true);
     safetyState.canIssueMotion.mockReturnValue(true);
+    safetyState.isEnableHeld.mockReturnValue(false);
     service = new MediaService(
       codes as never,
       hmiService as never,
@@ -66,8 +99,8 @@ describe('MediaService', () => {
   });
 
   afterEach(() => {
-    const timer = (service as unknown as { motionJog: NodeJS.Timeout | null })
-      .motionJog;
+    const timer = (service as unknown as { voicePulse: NodeJS.Timeout | null })
+      .voicePulse;
     if (timer) clearInterval(timer);
     jest.useRealTimers();
   });
@@ -311,6 +344,95 @@ describe('MediaService', () => {
     expect(hmiService.activateCell).toHaveBeenCalledWith('owva', false, {});
     expect(safetyState.releaseDeadman).not.toHaveBeenCalled();
     expect(safetyState.pulseDeadman).not.toHaveBeenCalled();
+  });
+
+  it('pulses Enable / Seam / Teach / Axis then clears so voice cannot stick ON', async () => {
+    jest.useFakeTimers();
+    const cases = [
+      { phrase: 'enable', id: 'enable', label: 'Enable' },
+      { phrase: 'seam tracking on', id: 'seam', label: 'Seam Tracking on/off' },
+      {
+        phrase: 'teach pipe middle position',
+        id: 'teach-pipe',
+        label: 'Teach Pipe Middle Position',
+      },
+      { phrase: 'axis fast', id: 'axis', label: 'Axis fast/slowly' },
+    ] as const;
+
+    for (const row of cases) {
+      hmiService.activateCell.mockClear();
+      const result = await service.voiceCommand(row.phrase, {
+        role: UserRole.OPERATOR,
+        clientId: 'device-1',
+        userId: 'u1',
+      });
+      expect(result).toEqual(
+        expect.objectContaining({ ok: true, label: row.label }),
+      );
+      expect(hmiService.activateCell).toHaveBeenCalledWith(
+        row.id,
+        true,
+        expect.any(Object),
+      );
+      await jest.advanceTimersByTimeAsync(2800);
+      expect(hmiService.activateCell).toHaveBeenCalledWith(row.id, false, {});
+    }
+  });
+
+  it('does not pulse Enable off when Listen already holds it', async () => {
+    safetyState.isEnableHeld.mockReturnValue(true);
+    const result = await service.voiceCommand('enable', {
+      role: UserRole.OPERATOR,
+      clientId: 'device-1',
+      userId: 'u1',
+    });
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, label: 'Enable' }),
+    );
+    expect(hmiService.activateCell).not.toHaveBeenCalled();
+  });
+
+  it('clears a prior voice pushbutton when a new phrase starts', async () => {
+    jest.useFakeTimers();
+    await service.voiceCommand('seam tracking', {
+      role: UserRole.OPERATOR,
+      clientId: 'device-1',
+      userId: 'u1',
+    });
+    hmiService.activateCell.mockClear();
+    await service.voiceCommand('axis fast', {
+      role: UserRole.OPERATOR,
+      clientId: 'device-1',
+      userId: 'u1',
+    });
+    expect(hmiService.activateCell).toHaveBeenCalledWith('seam', false, {});
+    expect(hmiService.activateCell).toHaveBeenCalledWith(
+      'axis',
+      true,
+      expect.any(Object),
+    );
+    await jest.advanceTimersByTimeAsync(2800);
+    expect(hmiService.activateCell).toHaveBeenCalledWith('axis', false, {});
+  });
+
+  it('drops a stale voice pulse coil without stopping the active pulse', () => {
+    const priv = service as unknown as {
+      endVoicePulse: (id: string) => void;
+      voicePulseCellId: string | null;
+      voicePulse: NodeJS.Timeout | null;
+    };
+    priv.voicePulseCellId = 'axis';
+    priv.voicePulse = setInterval(() => undefined, 60_000);
+    hmiService.activateCell.mockClear();
+    priv.endVoicePulse('seam');
+    expect(hmiService.activateCell).toHaveBeenCalledWith('seam', false, {});
+    expect(priv.voicePulseCellId).toBe('axis');
+    expect(priv.voicePulse).not.toBeNull();
+    clearInterval(priv.voicePulse);
+    priv.voicePulse = null;
+    priv.endVoicePulse('axis');
+    expect(priv.voicePulseCellId).toBeNull();
+    expect(hmiService.activateCell).toHaveBeenCalledWith('axis', false, {});
   });
 
   it('still clears the jog timer if clearing the coil fails', async () => {
