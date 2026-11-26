@@ -14,6 +14,7 @@ import { AssistantPage } from './pages/AssistantPage';
 import { FacePage } from './pages/FacePage';
 import { LoginPage } from './pages/LoginPage';
 import { MediaPage } from './pages/MediaPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 import { OperatorPage } from './pages/OperatorPage';
 import { OpsPage } from './pages/OpsPage';
 import { RequireRole } from '@/components/require-role';
@@ -154,6 +155,7 @@ export function App() {
           />
           <Route path="/assistant" element={<AssistantPage />} />
         </Route>
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </>
   );

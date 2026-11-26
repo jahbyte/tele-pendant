@@ -222,4 +222,25 @@ describe('App', () => {
       await screen.findByText('Add a PLC', {}, { timeout: 5000 }),
     ).toBeInTheDocument();
   });
+
+  it('shows not found for unknown addresses instead of a blank page', async () => {
+    const unknown = renderWithProviders(<App />, { route: '/operator/xyz' });
+    expect(
+      await screen.findByRole('heading', { name: 'Page not found' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('That address is not a Tele-Pendant screen.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Operator' })).toHaveAttribute(
+      'href',
+      '/operator',
+    );
+    unknown.unmount();
+
+    localStorage.setItem('accessToken', 'tok');
+    renderWithProviders(<App />, { route: '/no-such-page' });
+    expect(
+      await screen.findByRole('heading', { name: 'Page not found' }),
+    ).toBeInTheDocument();
+  });
 });
