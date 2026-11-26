@@ -521,12 +521,33 @@ export class HmiSeedService implements OnModuleInit {
     );
   }
 
-  /** Admin reset: wipe cells/overlays and reseed P03A21 (keeps registers). */
+  /**
+   * Admin reset: wipe cells/overlays on demo-p03a21 only, then reseed that
+   * screen (keeps registers and every other Operator screen intact).
+   */
   async resetP03a21Demo(): Promise<{ ok: true; cells: number }> {
-    await this.overlays.createQueryBuilder().delete().execute();
-    await this.cells.createQueryBuilder().delete().execute();
+    const screen = await this.backgrounds.findOne({
+      where: { name: 'demo-p03a21' },
+    });
+    if (screen) {
+      await this.overlays
+        .createQueryBuilder()
+        .delete()
+        .where('background_id = :id', { id: screen.id })
+        .execute();
+      await this.cells
+        .createQueryBuilder()
+        .delete()
+        .where('background_id = :id', { id: screen.id })
+        .execute();
+    }
     await this.seed();
-    const cells = await this.cells.count();
+    const demo = await this.backgrounds.findOne({
+      where: { name: 'demo-p03a21' },
+    });
+    const cells = demo
+      ? await this.cells.count({ where: { background: { id: demo.id } } })
+      : 0;
     this.logger.log(`P03A21 demo reset complete (${cells} cells)`);
     return { ok: true, cells };
   }
@@ -855,6 +876,19 @@ export class HmiSeedService implements OnModuleInit {
     ];
 
     for (const def of cellDefs) {
+      // Plant-shared STOP survives a scoped demo reset — do not create a second.
+      if (def.plantShared) {
+        const shared = await this.cells.find({
+          where: { background: IsNull() },
+        });
+        const hasStop = shared.some(
+          (cell) =>
+            cell.style === 'estop' ||
+            cell.requiresSafeAction ||
+            cell.label.trim().toUpperCase() === 'STOP',
+        );
+        if (hasStop) continue;
+      }
       const isMotion = def.isMotion ?? false;
       await this.cells.save(
         this.cells.create({

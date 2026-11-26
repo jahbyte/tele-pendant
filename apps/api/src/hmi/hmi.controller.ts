@@ -294,7 +294,7 @@ export class HmiController {
   @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary:
-      'Replace Operator cells with the P03A21 welding pendant demo layout',
+      'Replace demo-p03a21 cells/labels with the P03A21 pendant layout (other screens unchanged)',
   })
   resetP03a21Demo() {
     return this.hmiSeed.resetP03a21Demo();

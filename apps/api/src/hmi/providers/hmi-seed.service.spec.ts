@@ -231,6 +231,112 @@ describe('HmiSeedService', () => {
     expect(overlays.save).not.toHaveBeenCalled();
   });
 
+  it('resets only demo-p03a21 cells and overlays, not other screens', async () => {
+    const demo = { id: 'bg-demo', name: 'demo-p03a21', active: true };
+    const other = { id: 'bg-qa', name: 'QA Welder', active: false };
+    const { service, backgrounds, cells, overlays } = makeService({
+      cellCount: 5,
+      activeBg: demo,
+    });
+    backgrounds.findOne.mockImplementation(
+      async (q: { where?: { name?: string; active?: boolean } }) => {
+        if (q.where?.name === 'demo-p03a21') return demo;
+        if (q.where?.active) return demo;
+        return null;
+      },
+    );
+    const overlayWhere = jest.fn().mockReturnThis();
+    const overlayExecute = jest.fn().mockResolvedValue(undefined);
+    overlays.createQueryBuilder.mockReturnValue({
+      delete: jest.fn().mockReturnThis(),
+      where: overlayWhere,
+      execute: overlayExecute,
+    });
+    const cellWhere = jest.fn().mockReturnThis();
+    const cellExecute = jest.fn().mockResolvedValue(undefined);
+    cells.createQueryBuilder.mockReturnValue({
+      delete: jest.fn().mockReturnThis(),
+      where: cellWhere,
+      getCount: jest.fn().mockResolvedValue(0),
+      execute: cellExecute,
+    });
+    cells.count.mockResolvedValue(18);
+    const seed = jest.spyOn(service, 'seed').mockResolvedValue(undefined);
+
+    const result = await service.resetP03a21Demo();
+
+    expect(overlayWhere).toHaveBeenCalledWith('background_id = :id', {
+      id: 'bg-demo',
+    });
+    expect(cellWhere).toHaveBeenCalledWith('background_id = :id', {
+      id: 'bg-demo',
+    });
+    expect(overlayWhere).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: other.id }),
+    );
+    expect(seed).toHaveBeenCalled();
+    expect(cells.count).toHaveBeenCalledWith({
+      where: { background: { id: 'bg-demo' } },
+    });
+    expect(result).toEqual({ ok: true, cells: 18 });
+  });
+
+  it('reseeds when demo-p03a21 is missing without wiping other screens', async () => {
+    const { service, cells, overlays } = makeService({ cellCount: 3 });
+    // No demo screen yet — must not run an unscoped delete.
+    const seed = jest.spyOn(service, 'seed').mockResolvedValue(undefined);
+    cells.count.mockResolvedValue(0);
+
+    const result = await service.resetP03a21Demo();
+
+    expect(overlays.createQueryBuilder).not.toHaveBeenCalled();
+    expect(cells.createQueryBuilder).not.toHaveBeenCalled();
+    expect(seed).toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, cells: 0 });
+  });
+
+  it('skips creating a second plant-shared STOP when one already exists', async () => {
+    const demo = {
+      id: 'bg-demo',
+      name: 'demo-p03a21',
+      active: true,
+      imageUrl: '/hmi-assets/demo-p03a21.svg',
+    };
+    const { service, backgrounds, cells, registers, overlays } = makeService({
+      cellCount: 1,
+      activeBg: demo,
+    });
+    backgrounds.findOne.mockResolvedValue(demo);
+    overlays.count.mockResolvedValue(3);
+    cells.find.mockResolvedValue([
+      {
+        id: 'stop-1',
+        label: 'STOP',
+        style: 'estop',
+        requiresSafeAction: true,
+        background: null,
+      },
+    ]);
+    registers.findOne.mockImplementation(
+      async (q: { where?: { name?: string } }) => {
+        const name = q.where?.name ?? (q as { name?: string }).name;
+        if (!name) return null;
+        return { id: `reg-${name}`, name, kind: 'coil', address: 1 };
+      },
+    );
+
+    await service.seed();
+
+    const stopCreates = cells.create.mock.calls.filter(
+      (args: unknown[]) =>
+        typeof args[0] === 'object' &&
+        args[0] !== null &&
+        (args[0] as { label?: string }).label === 'STOP',
+    );
+    expect(stopCreates).toHaveLength(0);
+  });
+
   it('replaces crane trend flags with P03A21 Speed/Comms/Fault and purges samples', async () => {
     const { service, registers, trendSamples } = makeService({
       cellCount: 12,

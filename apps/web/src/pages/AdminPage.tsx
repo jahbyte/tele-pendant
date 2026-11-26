@@ -535,8 +535,8 @@ export function AdminPage() {
               <CardTitle>{t('cellsTitle')}</CardTitle>
               <CardDescription>
                 Buttons for the selected plant screen. Milestone-1 demo uses the
-                Siemens P03A21 welding pendant. Admins can reset that layout
-                anytime.
+                Siemens P03A21 welding pendant. Reset only rewrites the
+                demo-p03a21 screen; other screens keep their buttons and labels.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
@@ -548,7 +548,7 @@ export function AdminPage() {
                     onClick={() => {
                       void (async () => {
                         const ok = window.confirm(
-                          'Replace all Operator cells with the P03A21 pendant demo layout?',
+                          'Replace buttons and labels on the demo-p03a21 screen with the P03A21 pendant layout? Other screens are left alone.',
                         );
                         if (!ok) return;
                         try {

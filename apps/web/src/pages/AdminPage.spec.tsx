@@ -495,6 +495,9 @@ describe('AdminPage', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Reset P03A21 demo layout' }),
     );
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Other screens are left alone'),
+    );
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/hmi/demo/p03a21/reset', {}),
     );
