@@ -32,19 +32,24 @@ describe('HmiSeedService', () => {
     };
     const registers = {
       findOne: jest.fn().mockResolvedValue(null),
-      find: jest.fn().mockResolvedValue([
-        { name: 'holding.hoistHeightMm', trended: true },
-        { name: 'holding.loadKg', trended: true },
-        { name: 'holding.trolleyPosition', trended: true },
-        { name: 'holding.speedPct', trended: false },
-        { name: 'discrete.commsOk', trended: false },
-        { name: 'discrete.fault', trended: false },
-      ]),
+      find: jest.fn(async (opts?: object) => {
+        // find({ where: { name: In(...) } }) → no leftover crane rows by default
+        if (opts && 'where' in opts) return [];
+        return [
+          { name: 'holding.speedPct', trended: false },
+          { name: 'discrete.commsOk', trended: false },
+          { name: 'discrete.fault', trended: false },
+        ];
+      }),
       save: jest.fn(async (row: unknown) => ({
         id: 'reg',
         ...(row as object),
       })),
       create: jest.fn((row: unknown) => row),
+      delete: jest.fn().mockResolvedValue(undefined),
+      manager: {
+        query: jest.fn().mockResolvedValue(undefined),
+      },
     };
     const overlays = {
       createQueryBuilder: jest.fn(() => ({
@@ -357,32 +362,31 @@ describe('HmiSeedService', () => {
     expect(stopCreates).toHaveLength(0);
   });
 
-  it('replaces crane trend flags with P03A21 Speed/Comms/Fault and purges samples', async () => {
+  it('removes legacy crane registers and enables P03A21 Speed/Comms/Fault trends', async () => {
     const { service, registers, trendSamples } = makeService({
       cellCount: 12,
       selectorCount: 3,
       activeBg: { name: 'demo-p03a21', active: true },
     });
-    const hoist = { name: 'holding.hoistHeightMm', trended: true };
-    const load = { name: 'holding.loadKg', trended: true };
-    const trolley = { name: 'holding.trolleyPosition', trended: true };
+    const hoist = { id: 'h1', name: 'holding.hoistHeightMm', trended: true };
+    const load = { id: 'l1', name: 'holding.loadKg', trended: true };
+    const trolley = {
+      id: 't1',
+      name: 'holding.trolleyPosition',
+      trended: true,
+    };
     const speed = { name: 'holding.speedPct', trended: false };
     const comms = { name: 'discrete.commsOk', trended: false };
     const fault = { name: 'discrete.fault', trended: false };
-    registers.find.mockResolvedValue([
-      hoist,
-      load,
-      trolley,
-      speed,
-      comms,
-      fault,
-    ]);
+    registers.find.mockImplementation(async (opts?: object) => {
+      if (opts && 'where' in opts) return [hoist, load, trolley];
+      return [speed, comms, fault];
+    });
 
     await service.onModuleInit();
 
-    expect(hoist.trended).toBe(false);
-    expect(load.trended).toBe(false);
-    expect(trolley.trended).toBe(false);
+    expect(registers.manager.query).toHaveBeenCalled();
+    expect(registers.delete).toHaveBeenCalledWith(['h1', 'l1', 't1']);
     expect(speed.trended).toBe(true);
     expect(comms.trended).toBe(true);
     expect(fault.trended).toBe(true);

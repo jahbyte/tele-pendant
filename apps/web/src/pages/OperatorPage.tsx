@@ -219,8 +219,7 @@ export function OperatorPage() {
       motionDebug('tags.apply', {
         seq: payload.seq,
         at: payload.at,
-        hoistHeightMm: payload.hoistHeightMm,
-        trolleyPositionMm: payload.trolleyPositionMm,
+        speedPct: payload.speedPct,
         holding: holdsRef.current.size,
       });
     }

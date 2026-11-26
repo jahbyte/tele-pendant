@@ -35,6 +35,15 @@ describe('tagValueForRegister', () => {
     ).toBe(88);
   });
 
+  it('returns dash when legacy crane top-level fields are omitted', () => {
+    const plantOnly: TagSnapshot = {
+      speedPct: 40,
+      motorRunning: false,
+    };
+    expect(tagValueForRegister(plantOnly, 'holding.hoistHeightMm')).toBe('—');
+    expect(tagValueForRegister(plantOnly, 'holding.loadKg')).toBe('—');
+  });
+
   it('maps motor run/idle for trolley feedback', () => {
     expect(tagValueForRegister(tags, 'discrete.motorRunning')).toBe('RUN');
     expect(

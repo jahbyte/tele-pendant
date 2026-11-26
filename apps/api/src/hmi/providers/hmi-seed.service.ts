@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { copyFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { IsNull } from 'typeorm';
+import { In, IsNull } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   DEMO_CRANE_MAP,
@@ -124,6 +124,7 @@ export class HmiSeedService implements OnModuleInit {
     await this.syncP03a21DrawingLabels();
     await this.syncP03a21LakshmiFixes();
     await this.ensureRuntimeRegisters();
+    await this.removeLegacyCraneRegisters();
     await this.ensureSafetyRoles();
     await this.ensureSampleTrends();
     await this.ensureSharedStopIsGlobal();
@@ -362,7 +363,7 @@ export class HmiSeedService implements OnModuleInit {
     }
   }
 
-  /** Safety + crane leftovers the poller still resolves by name. */
+  /** Safety + P03A21 live tags the poller resolves by name. */
   private async ensureRuntimeRegisters(): Promise<void> {
     const extras: Array<[string, number, RegisterMap['kind'], string, string]> =
       [
@@ -385,27 +386,6 @@ export class HmiSeedService implements OnModuleInit {
         [
           'holding.speedPct',
           DEMO_CRANE_MAP.holdings.speedPct,
-          'holding',
-          'uint16',
-          'r',
-        ],
-        [
-          'holding.hoistHeightMm',
-          DEMO_CRANE_MAP.holdings.hoistHeightMm,
-          'holding',
-          'uint16',
-          'r',
-        ],
-        [
-          'holding.loadKg',
-          DEMO_CRANE_MAP.holdings.loadKg,
-          'holding',
-          'uint16',
-          'r',
-        ],
-        [
-          'holding.trolleyPosition',
-          DEMO_CRANE_MAP.holdings.trolleyPosition,
           'holding',
           'uint16',
           'r',
@@ -435,6 +415,46 @@ export class HmiSeedService implements OnModuleInit {
     for (const [name, address, kind, dataType, rw] of extras) {
       await this.upsertRegister(name, address, kind, dataType, rw);
     }
+  }
+
+  /**
+   * Drop leftover crane holdings from Config → Registers (and anything still
+   * pointing at them) so Assistant / trends cannot revive hoist/load/trolley.
+   */
+  private async removeLegacyCraneRegisters(): Promise<void> {
+    const names = [...LEGACY_CRANE_TREND_KEYS];
+    const rows = await this.registers.find({ where: { name: In(names) } });
+    if (rows.length === 0) return;
+    const ids = rows.map((row) => row.id);
+    const qm = ids.map(() => '?').join(',');
+    await this.registers.manager.query(
+      `UPDATE cells SET primary_register_id = NULL WHERE primary_register_id IN (${qm})`,
+      ids,
+    );
+    await this.registers.manager.query(
+      `UPDATE cells SET secondary_register_id = NULL WHERE secondary_register_id IN (${qm})`,
+      ids,
+    );
+    await this.registers.manager.query(
+      `UPDATE cells SET feedback_register_id = NULL WHERE feedback_register_id IN (${qm})`,
+      ids,
+    );
+    await this.registers.manager.query(
+      `UPDATE cells SET status_register_id = NULL WHERE status_register_id IN (${qm})`,
+      ids,
+    );
+    await this.registers.manager.query(
+      `UPDATE overlay_labels SET register_id = NULL WHERE register_id IN (${qm})`,
+      ids,
+    );
+    await this.registers.manager.query(
+      `DELETE FROM alarm_definitions WHERE register_id IN (${qm})`,
+      ids,
+    );
+    await this.registers.delete(ids);
+    this.logger.log(
+      `Removed ${ids.length} legacy crane register(s): ${names.join(', ')}`,
+    );
   }
 
   private async upsertRegister(
@@ -550,6 +570,7 @@ export class HmiSeedService implements OnModuleInit {
 
   async seed(): Promise<void> {
     await this.ensureRuntimeRegisters();
+    await this.removeLegacyCraneRegisters();
 
     const di = async (key: keyof typeof DEMO_P03A21_MAP.di) =>
       this.upsertRegister(

@@ -1,8 +1,10 @@
 export interface TagSnapshot {
-  hoistHeightMm: number;
-  loadKg: number;
+  /** Legacy crane height — omitted on P03A21 live polls. */
+  hoistHeightMm?: number;
+  /** Legacy crane load — omitted on P03A21 live polls. */
+  loadKg?: number;
   speedPct: number;
-  /** Demo / plant trolley travel (holding.trolleyPosition). */
+  /** Legacy crane trolley — omitted on P03A21 live polls. */
   trolleyPositionMm?: number;
   motorRunning: boolean;
   /** Plant fault discrete when present (FEAT-A1). */
@@ -73,8 +75,8 @@ export function tagValueForRegister(
     }
     return live;
   }
-  if (registerName.includes('hoistHeight')) return tags.hoistHeightMm;
-  if (registerName.includes('loadKg')) return tags.loadKg;
+  if (registerName.includes('hoistHeight')) return tags.hoistHeightMm ?? '—';
+  if (registerName.includes('loadKg')) return tags.loadKg ?? '—';
   if (registerName.includes('trolleyPosition')) {
     return tags.trolleyPositionMm ?? '—';
   }

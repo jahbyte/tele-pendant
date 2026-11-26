@@ -14,11 +14,15 @@ import { SafetyStateService } from '../../safety/providers/safety-state.service'
 import { TrendsService } from '../../trends/providers/trends.service';
 import { RealtimeGateway } from '../realtime.gateway';
 
+/** Old crane holdings — never re-publish into live tags / Assistant. */
+const LEGACY_CRANE_VALUE_KEYS = [
+  'holding.hoistHeightMm',
+  'holding.loadKg',
+  'holding.trolleyPosition',
+] as const;
+
 export type LiveTagSnapshot = {
-  hoistHeightMm: number;
-  loadKg: number;
   speedPct: number;
-  trolleyPositionMm: number;
   motorRunning: boolean;
   fault: boolean;
   commsOk: boolean;
@@ -95,21 +99,9 @@ export class TagPollerService implements OnModuleInit, OnModuleDestroy {
       const driver = this.plcService.getDriver();
       if (!driver.isConnected()) return;
 
-      const hoistAddr = await this.plcService.addressFor(
-        'holding.hoistHeightMm',
-        DEMO_CRANE_MAP.holdings.hoistHeightMm,
-      );
-      const loadAddr = await this.plcService.addressFor(
-        'holding.loadKg',
-        DEMO_CRANE_MAP.holdings.loadKg,
-      );
       const speedAddr = await this.plcService.addressFor(
         'holding.speedPct',
         DEMO_CRANE_MAP.holdings.speedPct,
-      );
-      const trolleyAddr = await this.plcService.addressFor(
-        'holding.trolleyPosition',
-        DEMO_CRANE_MAP.holdings.trolleyPosition,
       );
       const motorAddr = await this.plcService.addressFor(
         'discrete.motorRunning',
@@ -125,18 +117,8 @@ export class TagPollerService implements OnModuleInit, OnModuleDestroy {
       );
       // Batch-read contiguous demo map blocks so serialized Modbus keeps up
       // with the 250ms poll (per-register reads were freezing then jumping).
-      const holdingBase = Math.min(hoistAddr, loadAddr, speedAddr, trolleyAddr);
-      const holdingTop = Math.max(hoistAddr, loadAddr, speedAddr, trolleyAddr);
-      const holdingBlock = await driver.readHoldingRegisters(
-        holdingBase,
-        holdingTop - holdingBase + 1,
-      );
-      const pickHolding = (addr: number) =>
-        holdingBlock[addr - holdingBase] ?? 0;
-      const height = pickHolding(hoistAddr);
-      const loadKg = pickHolding(loadAddr);
-      const speed = pickHolding(speedAddr);
-      const trolleyPosition = pickHolding(trolleyAddr);
+      const holdingBlock = await driver.readHoldingRegisters(speedAddr, 1);
+      const speed = holdingBlock[0] ?? 0;
       const discreteBase = Math.min(motorAddr, faultAddr, commsAddr);
       const discreteTop = Math.max(motorAddr, faultAddr, commsAddr);
       const discreteBlock = await driver.readDiscreteInputs(
@@ -150,26 +132,19 @@ export class TagPollerService implements OnModuleInit, OnModuleDestroy {
       const commsOk = pickDiscrete(commsAddr);
 
       const coreValues: Record<string, number | boolean> = {
-        'holding.hoistHeightMm': height ?? 0,
-        'holding.loadKg': loadKg ?? 0,
         'holding.speedPct': speed ?? 0,
-        'holding.trolleyPosition': trolleyPosition ?? 0,
         'discrete.motorRunning': motorRunning,
         'discrete.fault': fault,
         'discrete.commsOk': commsOk,
       };
-      const values = {
+      const values = scrubLegacyCraneValues({
         ...this.lastTags?.values,
         ...coreValues,
-      };
+      });
 
       this.seq += 1;
-      const prev = this.lastTags;
       const snapshot: LiveTagSnapshot = {
-        hoistHeightMm: height ?? 0,
-        loadKg: loadKg ?? 0,
         speedPct: speed ?? 0,
-        trolleyPositionMm: trolleyPosition ?? 0,
         motorRunning,
         fault,
         commsOk,
@@ -188,13 +163,7 @@ export class TagPollerService implements OnModuleInit, OnModuleDestroy {
           seq: snapshot.seq,
           ms: Date.now() - this.pollStartedAt,
           deadmanActive: safety.deadmanActive,
-          hoistHeightMm: snapshot.hoistHeightMm,
-          trolleyPositionMm: snapshot.trolleyPositionMm,
           speedPct: snapshot.speedPct,
-          heightDelta: prev ? snapshot.hoistHeightMm - prev.hoistHeightMm : 0,
-          trolleyDelta: prev
-            ? snapshot.trolleyPositionMm - prev.trolleyPositionMm
-            : 0,
         });
       }
 
@@ -229,7 +198,10 @@ export class TagPollerService implements OnModuleInit, OnModuleDestroy {
           this.seq += 1;
           this.lastTags = {
             ...this.lastTags,
-            values: { ...this.lastTags.values, ...named },
+            values: scrubLegacyCraneValues({
+              ...this.lastTags.values,
+              ...named,
+            }),
             seq: this.seq,
             at: new Date().toISOString(),
           };
@@ -252,4 +224,14 @@ export class TagPollerService implements OnModuleInit, OnModuleDestroy {
       this.heavyInFlight = false;
     }
   }
+}
+
+function scrubLegacyCraneValues(
+  values: Record<string, number | boolean>,
+): Record<string, number | boolean> {
+  const next = { ...values };
+  for (const key of LEGACY_CRANE_VALUE_KEYS) {
+    delete next[key];
+  }
+  return next;
 }

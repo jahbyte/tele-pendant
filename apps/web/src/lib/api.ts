@@ -250,9 +250,12 @@ export interface ControlLease {
 }
 
 export interface LiveTags {
-  hoistHeightMm: number;
-  loadKg: number;
+  /** Legacy crane — omitted on P03A21 live polls. */
+  hoistHeightMm?: number;
+  /** Legacy crane — omitted on P03A21 live polls. */
+  loadKg?: number;
   speedPct: number;
+  /** Legacy crane — omitted on P03A21 live polls. */
   trolleyPositionMm?: number;
   motorRunning: boolean;
   fault: boolean;
