@@ -3,11 +3,20 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { createCanvas } from '@napi-rs/canvas';
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HmiService } from './hmi.service';
 import { renderPdfFirstPage } from '../hmi-pdf';
+
+function samplePng(): Buffer {
+  const canvas = createCanvas(2, 2);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a7';
+  ctx.fillRect(0, 0, 2, 2);
+  return canvas.toBuffer('image/png');
+}
 
 jest.mock('../hmi-pdf', () => ({
   renderPdfFirstPage: jest.fn(async (bytes: Buffer) => {
@@ -17,7 +26,8 @@ jest.mock('../hmi-pdf', () => ({
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw 'nope';
     }
-    return Buffer.from('png-page');
+    const canvas = createCanvas(2, 2);
+    return canvas.toBuffer('image/png');
   }),
 }));
 import { UserRole } from '../../users/enums/user-role.enum';
@@ -2062,10 +2072,23 @@ describe('HmiService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
 
     const png = await service.uploadBackgroundAsset({
-      buffer: Buffer.from('png-bytes'),
+      buffer: samplePng(),
       mimetype: 'image/png',
     });
     expect(png.imageUrl).toMatch(/\.png$/);
+
+    await expect(
+      service.uploadBackgroundAsset({
+        buffer: Buffer.from('png-bytes'),
+        mimetype: 'image/png',
+      }),
+    ).rejects.toThrow(/not a readable PNG/);
+    await expect(
+      service.uploadBackgroundAsset({
+        buffer: samplePng().subarray(0, 24),
+        mimetype: 'image/png',
+      }),
+    ).rejects.toThrow(/not a readable PNG/);
 
     if (prevDir === undefined) delete process.env.SQLITE_DIR;
     else process.env.SQLITE_DIR = prevDir;
@@ -2433,7 +2456,7 @@ describe('HmiService', () => {
     process.env.SQLITE_DIR = tmpdir();
     const uploaded = await service.uploadBackgroundAsset(
       {
-        buffer: Buffer.from('png-bytes'),
+        buffer: samplePng(),
         mimetype: 'image/png',
       },
       undefined,

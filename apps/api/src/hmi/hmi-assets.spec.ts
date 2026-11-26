@@ -1,12 +1,26 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { createCanvas } from '@napi-rs/canvas';
 import {
+  assertReadableRasterImage,
   hmiAssetsDirectory,
   pdfFailureMessage,
+  rasterFailureMessage,
+  rasterMagicMatches,
   resolveDataRoot,
   serveHmiAssets,
 } from './hmi-assets';
+
+function sampleRaster(
+  type: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
+) {
+  const canvas = createCanvas(2, 2);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a7';
+  ctx.fillRect(0, 0, 2, 2);
+  return canvas.toBuffer(type);
+}
 
 describe('hmi-assets paths', () => {
   const prevDb = process.env.DATABASE_PATH;
@@ -133,5 +147,54 @@ describe('hmi-assets paths', () => {
     ).toMatch(/Could not read that PDF/);
     expect(pdfFailureMessage(new Error('PDF is empty'))).toBe('PDF is empty');
     expect(pdfFailureMessage('boom')).toBe('Could not read that PDF');
+  });
+
+  it('rejects text and damaged raster uploads before they are stored', async () => {
+    const png = sampleRaster('image/png');
+    const jpg = sampleRaster('image/jpeg');
+    const webp = sampleRaster('image/webp');
+    const gif = sampleRaster('image/gif');
+    expect(rasterMagicMatches(png, 'png')).toBe(true);
+    expect(rasterMagicMatches(jpg, 'jpg')).toBe(true);
+    expect(rasterMagicMatches(webp, 'webp')).toBe(true);
+    expect(rasterMagicMatches(gif, 'gif')).toBe(true);
+    expect(rasterMagicMatches(Buffer.from('png-bytes'), 'png')).toBe(false);
+    expect(rasterMagicMatches(Buffer.from('RIFF'), 'webp')).toBe(false);
+    expect(rasterMagicMatches(Buffer.from('GIF8'), 'gif')).toBe(false);
+    expect(rasterMagicMatches(Buffer.from([0xff, 0xd8]), 'jpg')).toBe(false);
+    expect(rasterMagicMatches(png, 'tiff')).toBe(false);
+
+    await expect(
+      assertReadableRasterImage(png, 'png'),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertReadableRasterImage(jpg, 'jpg'),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertReadableRasterImage(webp, 'webp'),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertReadableRasterImage(gif, 'gif'),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertReadableRasterImage(png, 'svg'),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertReadableRasterImage(Buffer.from('not a png'), 'png'),
+    ).rejects.toThrow(/not a readable PNG/);
+    await expect(assertReadableRasterImage(jpg, 'png')).rejects.toThrow(
+      /not a readable PNG/,
+    );
+    await expect(
+      assertReadableRasterImage(png.subarray(0, 24), 'png'),
+    ).rejects.toThrow(/not a readable PNG/);
+    await expect(
+      assertReadableRasterImage(Buffer.from('not a jpeg'), 'jpg'),
+    ).rejects.toThrow(/not a readable JPEG/);
+    expect(
+      rasterFailureMessage(new Error('That file is not a readable PNG image')),
+    ).toMatch(/PNG/);
+    expect(rasterFailureMessage('boom')).toBe('Invalid plant graphic');
   });
 });

@@ -23,12 +23,14 @@ import { motionDebug } from '../../common/motion-debug';
 import { SafeActionPinService } from '../../users/providers/safe-action-pin.service';
 import { UserRole } from '../../users/enums/user-role.enum';
 import {
+  assertReadableRasterImage,
   HMI_ASSET_MIME,
   HMI_IMAGE_BYTE_LIMIT,
   HMI_PDF_BYTE_LIMIT,
   hmiAssetPublicPath,
   hmiAssetsDirectory,
   pdfFailureMessage,
+  rasterFailureMessage,
   sanitizeSvg,
   svgFailureMessage,
 } from '../hmi-assets';
@@ -258,6 +260,12 @@ export class HmiService {
           );
         } catch (err) {
           throw new BadRequestException(svgFailureMessage(err));
+        }
+      } else {
+        try {
+          await assertReadableRasterImage(file.buffer, ext);
+        } catch (err) {
+          throw new BadRequestException(rasterFailureMessage(err));
         }
       }
       writeFileSync(join(dir, filename), payload);

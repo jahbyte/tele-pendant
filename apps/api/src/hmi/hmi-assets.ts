@@ -1,6 +1,9 @@
 import { existsSync, mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { NextFunction, Request, Response } from 'express';
+
+const requireCanvas = createRequire(__filename);
 
 const HMI_ASSETS_PREFIX = '/hmi-assets';
 
@@ -78,6 +81,84 @@ export const HMI_PDF_BYTE_LIMIT = 8_000_000;
 
 export function svgFailureMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Invalid SVG';
+}
+
+export function rasterFailureMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Invalid plant graphic';
+}
+
+const RASTER_EXTS = new Set(['png', 'jpg', 'webp', 'gif']);
+
+/** Declared extension must match the file's magic header. */
+export function rasterMagicMatches(buffer: Buffer, ext: string): boolean {
+  if (ext === 'png') {
+    return (
+      buffer.length >= 8 &&
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47 &&
+      buffer[4] === 0x0d &&
+      buffer[5] === 0x0a &&
+      buffer[6] === 0x1a &&
+      buffer[7] === 0x0a
+    );
+  }
+  if (ext === 'jpg') {
+    return (
+      buffer.length >= 3 &&
+      buffer[0] === 0xff &&
+      buffer[1] === 0xd8 &&
+      buffer[2] === 0xff
+    );
+  }
+  if (ext === 'gif') {
+    if (buffer.length < 6) return false;
+    const head = buffer.subarray(0, 6).toString('ascii');
+    return head === 'GIF87a' || head === 'GIF89a';
+  }
+  if (ext === 'webp') {
+    return (
+      buffer.length >= 12 &&
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+    );
+  }
+  return false;
+}
+
+/**
+ * Reject text/damaged files labeled as PNG/JPEG/WebP/GIF so Operator never
+ * stores a "successful" upload that then shows a broken picture.
+ */
+export async function assertReadableRasterImage(
+  buffer: Buffer,
+  ext: string,
+): Promise<void> {
+  if (!RASTER_EXTS.has(ext)) return;
+  const label = ext === 'jpg' ? 'JPEG' : ext.toUpperCase();
+  try {
+    if (!rasterMagicMatches(buffer, ext)) {
+      throw new Error(`That file is not a readable ${label} image`);
+    }
+    const { loadImage } = requireCanvas('@napi-rs/canvas') as {
+      loadImage: (data: Buffer) => Promise<{ width: number; height: number }>;
+    };
+    const image = await loadImage(buffer);
+    if (!(image.width > 0 && image.height > 0)) {
+      throw new Error(`That file is not a readable ${label} image`);
+    }
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      /^That file is not a readable /.test(err.message)
+    ) {
+      throw err;
+    }
+    throw new Error(`That file is not a readable ${label} image`, {
+      cause: err,
+    });
+  }
 }
 
 /**
