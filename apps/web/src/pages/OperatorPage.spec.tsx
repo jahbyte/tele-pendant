@@ -2283,8 +2283,14 @@ describe('OperatorPage', () => {
     const enable = await screen.findByRole('button', { name: 'Enable' });
     const home = screen.getByRole('button', { name: 'Move Home Position' });
     fireEvent.pointerDown(enable);
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('enable.pulse'),
+    );
     fireEvent.pointerDown(home);
     fireEvent.pointerUp(enable);
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('enable.release'),
+    );
     await waitFor(() =>
       expect(
         posts.some(

@@ -4,6 +4,8 @@ describe('RealtimeGateway', () => {
   const safetyState = {
     pulseDeadman: jest.fn(),
     releaseDeadman: jest.fn().mockResolvedValue({ mode: 'normal' }),
+    pulseEnable: jest.fn(),
+    releaseEnable: jest.fn(),
     noteSocketDisconnect: jest.fn(),
     snapshot: jest
       .fn()
@@ -176,5 +178,34 @@ describe('RealtimeGateway', () => {
       mode: 'normal',
       deadmanActive: false,
     });
+  });
+
+  it('pulses and releases Enable for the authenticated socket user', () => {
+    const sock = client({
+      id: 'sock-3',
+      user: { sub: 'u1' },
+    });
+    expect(gateway.handleEnablePulse(sock as never)).toEqual({
+      mode: 'normal',
+      deadmanActive: false,
+    });
+    expect(safetyState.pulseEnable).toHaveBeenCalledWith({
+      userId: 'u1',
+      clientId: '',
+    });
+    expect(gateway.handleEnableRelease(sock as never)).toEqual({
+      mode: 'normal',
+      deadmanActive: false,
+    });
+    expect(safetyState.releaseEnable).toHaveBeenCalledWith({
+      userId: 'u1',
+      dropCoil: true,
+    });
+  });
+
+  it('ignores Enable pulse when the socket has no user', () => {
+    gateway.handleEnablePulse(client({ user: undefined }) as never);
+    expect(safetyState.pulseEnable).not.toHaveBeenCalled();
+    expect(safetyState.snapshot).toHaveBeenCalled();
   });
 });

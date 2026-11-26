@@ -6,7 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DEMO_CRANE_MAP } from '@tele-pendant/modbus-core';
+import { DEMO_CRANE_MAP, pendantDiName } from '@tele-pendant/modbus-core';
 import { cellRequiresControlLease } from '@tele-pendant/shared';
 import { Repository } from 'typeorm';
 import { AuditService } from '../../audit/providers/audit.service';
@@ -67,9 +67,19 @@ export class SafetyStateService implements OnModuleInit {
   private deadmanCoilHigh = false;
   /** Motion coils asserted via activate — clear only these on release (not every cell). */
   private assertedMotionCoils = new Set<number>();
+  /**
+   * Enable is hold-to-run with its own pulse watchdog (not deadman).
+   * A lost activate(false) must not leave the Enable coil ON.
+   */
+  private enableActive = false;
+  private lastEnablePulseAt: Date | null = null;
+  private enableHolderUserId: string | null = null;
+  private needsEnableDrop = false;
   private readonly watchdogTimeoutMs = 2000;
   /** Missed client pulses before motion drop (tight; WS pulse every 400ms). */
   private readonly deadmanTimeoutMs = 2500;
+  /** Same window as deadman — clients pulse Enable every ~400ms while held. */
+  private readonly enableTimeoutMs = 2500;
   private allowTimedMedia = false;
 
   private readonly plcService: PlcService;
@@ -117,6 +127,7 @@ export class SafetyStateService implements OnModuleInit {
     const driver = this.plcService.getDriver();
     if (!driver.isConnected()) return;
     try {
+      this.noteEnableCleared();
       await this.clearMotionCoils();
       await this.clearCommandCoils();
       const deadman = await this.roleAddress(
@@ -292,6 +303,76 @@ export class SafetyStateService implements OnModuleInit {
       lastClientPulseAt: this.lastClientPulseAt?.toISOString() ?? null,
       control: this.controlLease.snapshot(forUserId, forClientId),
     };
+  }
+
+  /** True while the Operator Enable hold is live (pulse watchdog). */
+  isEnableHeld(): boolean {
+    return this.enableActive;
+  }
+
+  /**
+   * Mark Enable asserted after a successful activate(true). Clients must keep
+   * pulsing or the coil is dropped (lost release / network gap).
+   */
+  noteEnableAsserted(userId?: string | null): void {
+    this.enableActive = true;
+    this.lastEnablePulseAt = new Date();
+    this.enableHolderUserId = userId?.trim() || null;
+    this.needsEnableDrop = false;
+    motionDebug('enable.asserted', {
+      userId: this.enableHolderUserId,
+    });
+  }
+
+  /** Refresh Enable hold lifetime. Ignored unless Enable is already asserted. */
+  pulseEnable(holder: { userId: string; clientId?: string | null }): void {
+    const userId = holder.userId?.trim();
+    if (!userId || !this.enableActive) return;
+    if (!this.controlLease.holds(userId, holder.clientId)) return;
+    this.lastEnablePulseAt = new Date();
+    this.enableHolderUserId = userId;
+    this.needsEnableDrop = false;
+  }
+
+  /**
+   * Clear Enable hold state after a successful activate(false), or force a PLC
+   * drop when the release HTTP call was lost but the client still has WS.
+   */
+  releaseEnable(opts?: {
+    userId?: string | null;
+    force?: boolean;
+    dropCoil?: boolean;
+  }): void {
+    if (!this.enableActive && !this.needsEnableDrop && !opts?.force) return;
+    if (
+      !opts?.force &&
+      this.enableActive &&
+      opts?.userId &&
+      this.enableHolderUserId &&
+      opts.userId !== this.enableHolderUserId
+    ) {
+      return;
+    }
+    motionDebug('enable.release', {
+      userId: opts?.userId ?? null,
+      force: Boolean(opts?.force),
+      dropCoil: Boolean(opts?.dropCoil ?? true),
+    });
+    this.clearEnableHolder();
+    if (opts?.dropCoil === false) return;
+    this.needsEnableDrop = true;
+    void this.dropEnableAndJogCoils();
+  }
+
+  noteEnableCleared(): void {
+    this.clearEnableHolder();
+    this.needsEnableDrop = false;
+  }
+
+  private clearEnableHolder(): void {
+    this.enableActive = false;
+    this.lastEnablePulseAt = null;
+    this.enableHolderUserId = null;
   }
 
   controlSnapshot(
@@ -644,6 +725,24 @@ export class SafetyStateService implements OnModuleInit {
         this.deadmanCoilHigh = true;
       }
 
+      // Enable pulse watchdog: lost release / offline mid-hold drops Enable + jogs.
+      if (
+        this.enableActive &&
+        this.lastEnablePulseAt &&
+        Date.now() - this.lastEnablePulseAt.getTime() > this.enableTimeoutMs
+      ) {
+        motionDebug('enable.timeout-drop', {
+          ageMs: Date.now() - this.lastEnablePulseAt.getTime(),
+          timeoutMs: this.enableTimeoutMs,
+          holderUserId: this.enableHolderUserId,
+        });
+        this.clearEnableHolder();
+        this.needsEnableDrop = true;
+      }
+      if (this.needsEnableDrop) {
+        await this.dropEnableAndJogCoils();
+      }
+
       if (this.mode === 'safe_state' && !this.eStopActive) {
         this.mode = 'normal';
       }
@@ -662,7 +761,42 @@ export class SafetyStateService implements OnModuleInit {
     this.controlLease.expireIfStale();
     if (!this.controlLease.consumeControlLost()) return;
     await this.releaseDeadman({ force: true });
+    this.noteEnableCleared();
     await this.clearCommandCoils();
+  }
+
+  /**
+   * Write Enable false and clear jog coils. Retried from tick while
+   * needsEnableDrop remains set (same pattern as deadman/motion drop).
+   */
+  private async dropEnableAndJogCoils(): Promise<void> {
+    const driver = this.plcService.getDriver();
+    if (!driver.isConnected()) return;
+    try {
+      const enable = await this.registers.findOneBy({
+        name: pendantDiName('enable'),
+      });
+      if (enable?.kind === 'coil') {
+        await driver.writeCoil(enable.address, false);
+      } else {
+        // Fallback: any style=enable cell primary coil.
+        const rows = await this.cells.find({
+          where: { style: 'enable' },
+          relations: { primaryRegister: true },
+        });
+        for (const cell of rows) {
+          const reg = cell.primaryRegister;
+          if (reg?.kind === 'coil') {
+            await driver.writeCoil(reg.address, false);
+          }
+        }
+      }
+      await this.clearMotionCoils();
+      this.needsEnableDrop = false;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Enable drop failed (will retry): ${message}`);
+    }
   }
 
   private async clearMotionCoils(): Promise<void> {
@@ -732,6 +866,7 @@ export class SafetyStateService implements OnModuleInit {
 
     if (mode === 'comms_lost' || mode === 'safe_state' || mode === 'e_stop') {
       try {
+        this.noteEnableCleared();
         const driver = this.plcService.getDriver();
         if (driver.isConnected()) {
           await this.clearMotionCoils();

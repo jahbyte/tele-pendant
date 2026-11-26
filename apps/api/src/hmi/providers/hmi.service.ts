@@ -684,6 +684,11 @@ export class HmiService {
       await performWrite();
     }
 
+    if (cell.style === 'enable') {
+      if (value) this.safetyState.noteEnableAsserted(opts.userId);
+      else this.safetyState.noteEnableCleared();
+    }
+
     if (!opts.refresh) {
       // Audit must not block Modbus/live tags on the activate hot path.
       void this.auditService
@@ -761,6 +766,15 @@ export class HmiService {
       name: pendantDiName('enable'),
     });
     if (!enable || enable.kind !== 'coil') return;
+    // In-memory hold must be live — blocks jogs if Enable coil is stuck ON
+    // after a lost release (pulse watchdog / WS release cleared the hold).
+    if (!this.safetyState.isEnableHeld()) {
+      this.refuseActivation(
+        opts,
+        label,
+        'Hold Enable before using motion controls',
+      );
+    }
     const driver = this.plcService.getDriver();
     const [on] = await driver.readCoils(enable.address, 1);
     if (!on) {

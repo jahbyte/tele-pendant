@@ -337,6 +337,25 @@ export function OperatorPage() {
     return () => window.clearInterval(id);
   }, [heldVersion, layoutQuery.data?.cells]);
 
+  // Enable has its own pulse watchdog so a lost activate(false) cannot leave
+  // the coil ON. Listen keeps Enable in holdsRef, so pulses continue there too.
+  useEffect(() => {
+    const socket = getRealtimeSocket();
+    const enableHeld = [...holdsRef.current.values()].some((hold) => {
+      const heldCell = layoutQuery.data?.cells.find(
+        (c) => c.id === hold.cellId,
+      );
+      return heldCell?.style === 'enable';
+    });
+    if (!enableHeld) return;
+    const pulse = () => {
+      socket.emit('enable.pulse');
+    };
+    pulse();
+    const id = window.setInterval(pulse, 400);
+    return () => window.clearInterval(id);
+  }, [heldVersion, layoutQuery.data?.cells]);
+
   const activate = useMutation({
     mutationFn: (args: {
       id: string;
@@ -393,6 +412,10 @@ export function OperatorPage() {
   }
 
   function dropCoil(cell: CellDto, direction?: 'a' | 'b' | null) {
+    if (cell.style === 'enable') {
+      // WS release clears Enable even when HTTP activate(false) is lost.
+      getRealtimeSocket().emit('enable.release');
+    }
     const t0 = Date.now();
     void activate
       .mutateAsync({

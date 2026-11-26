@@ -92,6 +92,9 @@ describe('HmiService', () => {
       .mockResolvedValue({ mode: 'normal', eStopActive: false }),
     noteMotionCoilAsserted: jest.fn(),
     noteMotionCoilCleared: jest.fn(),
+    noteEnableAsserted: jest.fn(),
+    noteEnableCleared: jest.fn(),
+    isEnableHeld: jest.fn().mockReturnValue(true),
     getRoles: jest.fn().mockResolvedValue({
       eStopRegisterId: 'estop-id',
       deadmanRegisterId: 'dead-id',
@@ -128,6 +131,7 @@ describe('HmiService', () => {
     backgrounds.findOneBy.mockResolvedValue(null);
     safetyState.canIssueMotion.mockReturnValue(false);
     safetyState.holdsControl.mockReturnValue(true);
+    safetyState.isEnableHeld.mockReturnValue(true);
     safetyState.snapshot.mockReturnValue({
       mode: 'normal',
       eStopActive: false,
@@ -349,6 +353,7 @@ describe('HmiService', () => {
       },
     });
     safetyState.canIssueMotion.mockReturnValue(true);
+    safetyState.isEnableHeld.mockReturnValue(false);
     registers.findOneBy.mockImplementation(async (q: { name?: string }) => {
       if (q.name === 'coil.p03a21.di.enable') {
         return { kind: 'coil', address: 10, name: 'coil.p03a21.di.enable' };
@@ -356,10 +361,31 @@ describe('HmiService', () => {
       return null;
     });
     plcService.getDriver.mockReturnValue({
-      readCoils: jest.fn().mockResolvedValue([false]),
+      readCoils: jest.fn().mockResolvedValue([true]),
     });
     await expect(
       service.activateCell('bad-owva', true, {
+        role: UserRole.OPERATOR,
+        userId: 'u1',
+      }),
+    ).rejects.toThrow(/Hold Enable/);
+    expect(plcService.writeCoil).not.toHaveBeenCalled();
+  });
+
+  it('blocks jog when Enable coil is stuck ON but hold was cleared', async () => {
+    safetyState.canIssueMotion.mockReturnValue(true);
+    safetyState.isEnableHeld.mockReturnValue(false);
+    registers.findOneBy.mockImplementation(async (q: { name?: string }) => {
+      if (q.name === 'coil.p03a21.di.enable') {
+        return { kind: 'coil', address: 10, name: 'coil.p03a21.di.enable' };
+      }
+      return null;
+    });
+    plcService.getDriver.mockReturnValue({
+      readCoils: jest.fn().mockResolvedValue([true]),
+    });
+    await expect(
+      service.activateCell('c1', true, {
         role: UserRole.OPERATOR,
         userId: 'u1',
       }),
@@ -641,10 +667,16 @@ describe('HmiService', () => {
         secondaryRegister: { kind: 'coil', address: 27 },
       },
     ]);
+    await service.activateCell('en', true, {
+      role: UserRole.OPERATOR,
+      userId: 'u1',
+    });
+    expect(safetyState.noteEnableAsserted).toHaveBeenCalledWith('u1');
     await service.activateCell('en', false, {
       role: UserRole.OPERATOR,
       userId: 'u1',
     });
+    expect(safetyState.noteEnableCleared).toHaveBeenCalled();
     expect(plcService.writeCoil).toHaveBeenCalledWith(43, false);
     expect(plcService.writeCoil).toHaveBeenCalledWith(26, false);
     expect(plcService.writeCoil).toHaveBeenCalledWith(27, false);

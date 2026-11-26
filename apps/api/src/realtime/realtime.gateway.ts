@@ -134,6 +134,35 @@ export class RealtimeGateway
     });
   }
 
+  /**
+   * Keep Enable hold alive while the finger is down (or Listen keeps it).
+   * Stopping pulses drops Enable even if activate(false) was lost on HTTP.
+   */
+  @SubscribeMessage('enable.pulse')
+  handleEnablePulse(@ConnectedSocket() client: Socket) {
+    const user = this.userOf(client);
+    if (!user?.sub) {
+      return this.safetyState.snapshot();
+    }
+    const clientId = this.controlClientIdOf(client);
+    this.safetyState.pulseEnable({
+      userId: user.sub,
+      clientId,
+    });
+    return this.safetyState.snapshot(user.sub, clientId);
+  }
+
+  /** Best-effort Enable drop when HTTP activate(false) cannot get through. */
+  @SubscribeMessage('enable.release')
+  handleEnableRelease(@ConnectedSocket() client: Socket) {
+    const user = this.userOf(client);
+    this.safetyState.releaseEnable({
+      userId: user?.sub,
+      dropCoil: true,
+    });
+    return this.safetyState.snapshot(user?.sub, this.controlClientIdOf(client));
+  }
+
   @SubscribeMessage('safety.get')
   handleSafetyGet() {
     return this.safetyState.snapshot();

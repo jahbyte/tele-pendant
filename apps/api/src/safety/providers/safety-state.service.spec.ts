@@ -915,6 +915,139 @@ describe('SafetyStateService', () => {
     expect(driver.writeCoil).toHaveBeenCalledWith(expect.any(Number), false);
   });
 
+  it('expires Enable hold and clears Enable + jog coils after lost pulses', async () => {
+    jest.useFakeTimers();
+    const now = Date.now();
+    jest.setSystemTime(now);
+    claimAs('u1');
+    registers.findOneBy.mockImplementation(async (q: { name?: string }) => {
+      if (q.name === 'coil.p03a21.di.enable') {
+        return { kind: 'coil', address: 43, name: 'coil.p03a21.di.enable' };
+      }
+      return null;
+    });
+    service.noteEnableAsserted('u1');
+    expect(service.isEnableHeld()).toBe(true);
+    service.pulseEnable({ userId: 'u1', clientId: clientFor('u1') });
+    service.noteMotionCoilAsserted(26);
+    jest.setSystemTime(now + 2600);
+    driver.writeCoil.mockClear();
+    await service.tick();
+    expect(service.isEnableHeld()).toBe(false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(26, false);
+  });
+
+  it('WS enable.release drops Enable when HTTP activate(false) was lost', async () => {
+    claimAs('u1');
+    registers.findOneBy.mockResolvedValue({
+      kind: 'coil',
+      address: 43,
+      name: 'coil.p03a21.di.enable',
+    });
+    service.noteEnableAsserted('u1');
+    service.noteMotionCoilAsserted(26);
+    driver.writeCoil.mockClear();
+    service.releaseEnable({ userId: 'u1', dropCoil: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(service.isEnableHeld()).toBe(false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(driver.writeCoil).toHaveBeenCalledWith(26, false);
+  });
+
+  it('ignores Enable pulses from non-holders and clears on noteEnableCleared', () => {
+    claimAs('u1');
+    service.pulseEnable({ userId: 'u1', clientId: clientFor('u1') });
+    expect(service.isEnableHeld()).toBe(false);
+    service.noteEnableAsserted('u1');
+    service.pulseEnable({ userId: 'u2', clientId: clientFor('u2') });
+    expect(service.isEnableHeld()).toBe(true);
+    service.releaseEnable({ userId: 'u2' });
+    expect(service.isEnableHeld()).toBe(true);
+    service.releaseEnable({ userId: 'u1', dropCoil: false });
+    expect(service.isEnableHeld()).toBe(false);
+    service.noteEnableAsserted('u1');
+    service.noteEnableCleared();
+    expect(service.isEnableHeld()).toBe(false);
+    service.releaseEnable({ userId: 'u1' });
+    expect(service.isEnableHeld()).toBe(false);
+  });
+
+  it('drops Enable via style=enable cells when the named register is missing', async () => {
+    claimAs('u1');
+    registers.findOneBy.mockResolvedValue(null);
+    cells.find.mockImplementation(
+      async (query?: { where?: { style?: string; isMotion?: boolean } }) => {
+        if (query?.where?.style === 'enable') {
+          return [
+            {
+              style: 'enable',
+              primaryRegister: { kind: 'coil', address: 43 },
+            },
+            {
+              style: 'enable',
+              primaryRegister: { kind: 'holding', address: 99 },
+            },
+          ];
+        }
+        return [];
+      },
+    );
+    service.noteEnableAsserted('u1');
+    driver.writeCoil.mockClear();
+    service.releaseEnable({ userId: 'u1', dropCoil: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+    expect(driver.writeCoil).not.toHaveBeenCalledWith(99, false);
+  });
+
+  it('retries Enable drop after a write failure', async () => {
+    claimAs('u1');
+    registers.findOneBy.mockResolvedValue({
+      kind: 'coil',
+      address: 43,
+      name: 'coil.p03a21.di.enable',
+    });
+    service.noteEnableAsserted();
+    service.noteEnableAsserted('  ');
+    expect(service.isEnableHeld()).toBe(true);
+    driver.writeCoil.mockRejectedValueOnce(new Error('bus busy'));
+    service.releaseEnable({ userId: 'u1', dropCoil: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    driver.writeCoil.mockResolvedValue(undefined);
+    driver.writeCoil.mockClear();
+    const priv = service as unknown as { needsEnableDrop: boolean };
+    priv.needsEnableDrop = true;
+    await service.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+  });
+
+  it('skips Enable drop when PLC is disconnected and retries non-Error failures', async () => {
+    claimAs('u1');
+    registers.findOneBy.mockResolvedValue({
+      kind: 'coil',
+      address: 43,
+      name: 'coil.p03a21.di.enable',
+    });
+    service.noteEnableAsserted('u1');
+    driver.isConnected.mockReturnValue(false);
+    service.releaseEnable({ force: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(driver.writeCoil).not.toHaveBeenCalledWith(43, false);
+
+    driver.isConnected.mockReturnValue(true);
+    service.noteEnableAsserted('u1');
+    driver.writeCoil.mockRejectedValueOnce('bus down');
+    service.releaseEnable({ dropCoil: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    driver.writeCoil.mockResolvedValue(undefined);
+    driver.writeCoil.mockClear();
+    const priv = service as unknown as { needsEnableDrop: boolean };
+    priv.needsEnableDrop = true;
+    await service.tick();
+    expect(driver.writeCoil).toHaveBeenCalledWith(43, false);
+  });
+
   it('unbinds socket on flap; deadman expires on pulse timeout', async () => {
     jest.useFakeTimers();
     const now = Date.now();

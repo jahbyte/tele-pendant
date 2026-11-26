@@ -382,9 +382,14 @@ export function OperatorScreen({ token }: { token: string }) {
     (key: string, cellId: string, direction?: 'a' | 'b' | null) => {
       releaseWaiting.current.delete(key);
       if (!leaseStillHeld()) releaseDeadman();
+      const cell = layoutQuery.data?.cells.find((row) => row.id === cellId);
+      if (cell?.style === 'enable') {
+        // WS release clears Enable even when HTTP activate(false) is lost.
+        socketRef.current?.emit('enable.release');
+      }
       void dropMotionCoil(cellId, direction);
     },
-    [dropMotionCoil, leaseStillHeld, releaseDeadman],
+    [dropMotionCoil, layoutQuery.data?.cells, leaseStillHeld, releaseDeadman],
   );
 
   // Pulse deadman while any jog is held. Enable can stay down beside it.
@@ -399,6 +404,24 @@ export function OperatorScreen({ token }: { token: string }) {
     if (!needsPulse) return;
     const pulse = () => {
       socketRef.current?.emit('deadman.pulse');
+    };
+    pulse();
+    const id = setInterval(pulse, 400);
+    return () => clearInterval(id);
+  }, [heldVersion, layoutQuery.data?.cells]);
+
+  // Enable pulse watchdog: lost activate(false) must not leave the coil ON.
+  useEffect(() => {
+    void heldVersion;
+    const enableHeld = [...holdsRef.current.values()].some((hold) => {
+      const cell = layoutQuery.data?.cells.find(
+        (row) => row.id === hold.cellId,
+      );
+      return cell?.style === 'enable';
+    });
+    if (!enableHeld) return;
+    const pulse = () => {
+      socketRef.current?.emit('enable.pulse');
     };
     pulse();
     const id = setInterval(pulse, 400);
@@ -556,6 +579,9 @@ export function OperatorScreen({ token }: { token: string }) {
             (row) => row.id === hold.cellId,
           );
           if (!cell || !cellUsesHoldToRun(cell)) continue;
+          if (cell.style === 'enable') {
+            socketRef.current?.emit('enable.release');
+          }
           void apiPost(
             `/hmi/cells/${hold.cellId}/activate`,
             {
