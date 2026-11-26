@@ -14,7 +14,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useQuery } from '@tanstack/react-query';
 import {
   cellPulsesDeadman,
@@ -40,10 +39,7 @@ import { operatorApiError } from '../api-errors';
 import { apiGet, apiPost, getApiBase } from '../api';
 import { getControlClientId } from '../control-client-id';
 import { useControlLease } from '../control-lease';
-import {
-  deferEnableRelease,
-  voiceKeepsEnable,
-} from '../enable-voice-bridge';
+import { deferEnableRelease, voiceKeepsEnable } from '../enable-voice-bridge';
 import type { Cell, ControlLease, Layout } from '../types';
 import { useLocale } from '../locale';
 import { HelpTip } from '../tour';
@@ -56,7 +52,6 @@ import { ESTOP, matrixCellStatePalette } from '../hmi-styles';
 import { PlantImage } from '../plant-graphic';
 import { useTheme } from '../theme';
 import { Card, showErrorAlert } from '../ui';
-import { syncFingers, touchesStillDown, type Finger } from '../multi-touch';
 
 type SafetySnap = {
   mode: string;
@@ -236,7 +231,6 @@ export function OperatorScreen({ token }: { token: string }) {
   const socketRef = useRef<Socket | null>(null);
   const inflight = useRef(new Set<string>());
   const releaseWaiting = useRef(new Map<string, 'a' | 'b' | null>());
-  const fingers = useRef(new Map<number, Finger>());
   const targets = useRef(
     new Map<
       string,
@@ -553,17 +547,6 @@ export function OperatorScreen({ token }: { token: string }) {
           holdsRef.current.set(holdKey(hold.cellId, hold.direction), hold);
         }
         releaseWaiting.current.clear();
-        if (!keepEnable) {
-          fingers.current.clear();
-        } else {
-          for (const [id, finger] of [...fingers.current.entries()]) {
-            const target = finger.key
-              ? targets.current.get(finger.key)
-              : undefined;
-            if (target?.cell.style === 'enable') continue;
-            fingers.current.delete(id);
-          }
-        }
         bumpHolds();
         if (!keepEnable) {
           releaseDeadman();
@@ -699,65 +682,6 @@ export function OperatorScreen({ token }: { token: string }) {
     hasTags: tags !== null,
     liveFallback,
   });
-
-  const pressCellRef = useRef(pressCell);
-  const releaseCellRef = useRef(releaseCell);
-  pressCellRef.current = pressCell;
-  releaseCellRef.current = releaseCell;
-
-  const applyTouches = useCallback(
-    (
-      touches: { id: number; x: number; y: number }[],
-      lifted: { id: number; x: number; y: number }[] = [],
-    ) => {
-      const { press, release } = syncFingers(
-        fingers.current,
-        touchesStillDown(touches, lifted),
-        (x, y) => {
-          for (const [key, target] of targets.current) {
-            if (
-              x >= target.x &&
-              y >= target.y &&
-              x <= target.x + target.width &&
-              y <= target.y + target.height
-            ) {
-              return key;
-            }
-          }
-          return null;
-        },
-        (key) => targets.current.get(key)?.cell.style === 'enable',
-      );
-      for (const key of release) {
-        const target = targets.current.get(key);
-        if (target) releaseCellRef.current(target.cell, target.direction);
-      }
-      for (const key of press) {
-        const target = targets.current.get(key);
-        if (target) void pressCellRef.current(target.cell, target.direction);
-      }
-    },
-    [],
-  );
-
-  const matrixGesture = useMemo(
-    () =>
-      Gesture.Manual()
-        .runOnJS(true)
-        .onTouchesDown((event) => {
-          applyTouches(event.allTouches);
-        })
-        .onTouchesMove((event) => {
-          applyTouches(event.allTouches);
-        })
-        .onTouchesUp((event) => {
-          applyTouches(event.allTouches, event.changedTouches);
-        })
-        .onTouchesCancelled((event) => {
-          applyTouches(event.allTouches, event.changedTouches);
-        }),
-    [applyTouches],
-  );
 
   const drawnImage = useMemo(
     () =>
@@ -1749,75 +1673,78 @@ export function OperatorScreen({ token }: { token: string }) {
             <HelpTip id="tour.operator.holdHint">
               <HelpTip id="tour.operator.matrix">
                 <View>
-                  <GestureDetector gesture={matrixGesture}>
-                    <View
-                      ref={boardRef as never}
-                      collapsable={false}
-                      onLayout={(event) => {
-                        const { width, height } = event.nativeEvent.layout;
-                        setBoardBox((prev) =>
-                          Math.abs(prev.width - width) < 1 &&
-                          Math.abs(prev.height - height) < 1
-                            ? prev
-                            : { width, height },
-                        );
-                      }}
-                      style={
-                        isP03a21
-                          ? {
-                              width: '100%',
-                              backgroundColor: '#f4f1ea',
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: '#d5d0c6',
-                              paddingVertical: 2,
-                              paddingHorizontal: 4,
-                            }
-                          : { width: '100%' }
-                      }
-                    >
-                      {grid
-                        ? grid.rows.map((row, rowIdx) => (
-                            <View
-                              key={`row-${rowIdx}`}
-                              className="flex-row"
-                              style={{
-                                flexGrow: 0,
-                                flexShrink: 0,
-                                minHeight: 44,
-                                gap: matrixGap,
-                                alignItems: 'stretch',
-                              }}
-                            >
-                              {row.map((cell, colIdx) => {
-                                const isStop =
-                                  Boolean(cell) &&
-                                  Boolean(stopCell) &&
-                                  (cell!.id === stopCell!.id ||
-                                    cell!.style === 'estop');
-                                if (!cell || isStop) {
-                                  return (
-                                    <View
-                                      key={`hole-${rowIdx}-${colIdx}`}
-                                      style={{ flex: 1, minWidth: 0 }}
-                                      accessibilityElementsHidden
-                                    />
-                                  );
-                                }
+                  {/*
+                    Per-cell Pressables (not Gesture.Manual): Expo Go / RNGH 3.3
+                    cancels a second finger while Manual holds Enable, so the
+                    header mic never fires. Separate Pressables keep Enable +
+                    Listen (and Enable + rocker) working with two fingers.
+                  */}
+                  <View
+                    collapsable={false}
+                    onLayout={(event) => {
+                      const { width, height } = event.nativeEvent.layout;
+                      setBoardBox((prev) =>
+                        Math.abs(prev.width - width) < 1 &&
+                        Math.abs(prev.height - height) < 1
+                          ? prev
+                          : { width, height },
+                      );
+                    }}
+                    style={
+                      isP03a21
+                        ? {
+                            width: '100%',
+                            backgroundColor: '#f4f1ea',
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: '#d5d0c6',
+                            paddingVertical: 2,
+                            paddingHorizontal: 4,
+                          }
+                        : { width: '100%' }
+                    }
+                  >
+                    {grid
+                      ? grid.rows.map((row, rowIdx) => (
+                          <View
+                            key={`row-${rowIdx}`}
+                            className="flex-row"
+                            style={{
+                              flexGrow: 0,
+                              flexShrink: 0,
+                              minHeight: 44,
+                              gap: matrixGap,
+                              alignItems: 'stretch',
+                            }}
+                          >
+                            {row.map((cell, colIdx) => {
+                              const isStop =
+                                Boolean(cell) &&
+                                Boolean(stopCell) &&
+                                (cell!.id === stopCell!.id ||
+                                  cell!.style === 'estop');
+                              if (!cell || isStop) {
                                 return (
                                   <View
-                                    key={cell.id}
+                                    key={`hole-${rowIdx}-${colIdx}`}
                                     style={{ flex: 1, minWidth: 0 }}
-                                  >
-                                    {renderMobileCell(cell, true)}
-                                  </View>
+                                    accessibilityElementsHidden
+                                  />
                                 );
-                              })}
-                            </View>
-                          ))
-                        : null}
-                    </View>
-                  </GestureDetector>
+                              }
+                              return (
+                                <View
+                                  key={cell.id}
+                                  style={{ flex: 1, minWidth: 0 }}
+                                >
+                                  {renderMobileCell(cell, false)}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        ))
+                      : null}
+                  </View>
                 </View>
               </HelpTip>
             </HelpTip>

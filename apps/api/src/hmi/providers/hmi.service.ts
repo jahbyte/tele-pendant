@@ -275,6 +275,8 @@ export class HmiService {
   /**
    * Remove an inactive screen and its buttons/labels.
    * Activate another screen first if this one is the shared default.
+   * STOP is plant-shared: if this screen owned it, keep STOP (background null)
+   * so every remaining Operator dock and voice "stop" still work.
    */
   async deleteBackground(id: string, actor?: Actor): Promise<{ ok: true }> {
     const row = await this.backgrounds.findOneBy({ id });
@@ -287,6 +289,19 @@ export class HmiService {
     const count = await this.backgrounds.count();
     if (count <= 1) {
       throw new BadRequestException('The last plant screen cannot be deleted');
+    }
+    const owned = await this.cells.find({
+      where: { background: { id } },
+      relations: { primaryRegister: true },
+    });
+    for (const cell of owned) {
+      if (
+        this.isProtectedStopCell(cell) ||
+        cell.label.trim().toUpperCase() === 'STOP'
+      ) {
+        cell.background = null;
+        await this.cells.save(cell);
+      }
     }
     await this.cells
       .createQueryBuilder()

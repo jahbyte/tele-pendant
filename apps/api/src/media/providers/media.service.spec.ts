@@ -370,13 +370,33 @@ describe('MediaService', () => {
   });
 
   it('returns cell_not_found when label missing from layout', async () => {
-    hmiService.getLayout.mockResolvedValueOnce({ cells: [] });
+    hmiService.getLayout.mockResolvedValueOnce({ cells: [], stop: null });
     const result = await service.voiceCommand('stop', {
       role: UserRole.SUPERVISOR,
       clientId: 'device-1',
     });
     expect(result).toEqual(
       expect.objectContaining({ ok: false, reason: 'cell_not_found' }),
+    );
+  });
+
+  it('uses shared layout.stop for voice STOP when cells omit it', async () => {
+    hmiService.getLayout.mockResolvedValueOnce({
+      cells: p03Cells.filter((c) => c.label !== 'STOP'),
+      stop: p03Cells.find((c) => c.label === 'STOP'),
+    });
+    const result = await service.voiceCommand('stop', {
+      role: UserRole.OPERATOR,
+      clientId: 'device-1',
+      userId: 'u1',
+    });
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, label: 'STOP' }),
+    );
+    expect(hmiService.activateCell).toHaveBeenCalledWith(
+      'stop',
+      true,
+      expect.any(Object),
     );
   });
 

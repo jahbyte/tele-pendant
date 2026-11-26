@@ -43,12 +43,7 @@ describe('syncFingers', () => {
     const fingers = new Map<number, Finger>();
     const sticky = (key: string) => key === 'enable';
     syncFingers(fingers, [{ id: 1, x: 10, y: 10 }], hit, sticky);
-    const moved = syncFingers(
-      fingers,
-      [{ id: 1, x: 10, y: 40 }],
-      hit,
-      sticky,
-    );
+    const moved = syncFingers(fingers, [{ id: 1, x: 10, y: 40 }], hit, sticky);
     expect(moved).toEqual({ press: [], release: [] });
     expect(fingers.get(1)?.key).toBe('enable');
     expect(fingers.get(1)?.scrolling).toBe(true);

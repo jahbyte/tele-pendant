@@ -186,9 +186,10 @@ export class MediaService implements OnModuleInit {
     }
 
     const layout = await this.hmiService.getLayout();
-    const cell = layout.cells.find(
-      (c) => c.label.toLowerCase() === label.toLowerCase(),
-    );
+    const cell =
+      (label === 'STOP' ? layout.stop : null) ??
+      layout.cells.find((c) => c.label.toLowerCase() === label.toLowerCase()) ??
+      null;
     if (!cell) {
       return { ok: false, reason: 'cell_not_found', transcript, label };
     }

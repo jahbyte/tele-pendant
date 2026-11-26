@@ -126,8 +126,34 @@ export class HmiSeedService implements OnModuleInit {
     await this.ensureRuntimeRegisters();
     await this.ensureSafetyRoles();
     await this.ensureSampleTrends();
+    await this.ensureSharedStopIsGlobal();
     await this.attachOrphanCells();
     await this.ensureDemoPlantExample();
+  }
+
+  /**
+   * STOP is plant-shared (background null). Detach any STOP still owned by a
+   * screen so deleting that screen cannot wipe the dock / voice stop.
+   */
+  private async ensureSharedStopIsGlobal(): Promise<void> {
+    const rows = await this.cells.find({
+      relations: { primaryRegister: true, background: true },
+    });
+    const owned = rows.filter(
+      (cell) =>
+        cell.background &&
+        (cell.style === 'estop' ||
+          cell.label.trim().toUpperCase() === 'STOP' ||
+          cell.primaryRegister?.name === 'coil.eStop'),
+    );
+    if (owned.length === 0) return;
+    for (const cell of owned) {
+      cell.background = null;
+    }
+    await this.cells.save(owned);
+    this.logger.log(
+      `Detached ${owned.length} shared STOP cell(s) from plant screens`,
+    );
   }
 
   /**
@@ -239,8 +265,17 @@ export class HmiSeedService implements OnModuleInit {
     const active = await this.backgrounds.findOne({ where: { active: true } });
     if (!active) return;
     const orphans = (
-      await this.cells.find({ where: { background: IsNull() } })
-    ).filter((cell) => !cell.background);
+      await this.cells.find({
+        where: { background: IsNull() },
+        relations: { primaryRegister: true },
+      })
+    ).filter(
+      (cell) =>
+        !cell.background &&
+        cell.style !== 'estop' &&
+        cell.label.trim().toUpperCase() !== 'STOP' &&
+        cell.primaryRegister?.name !== 'coil.eStop',
+    );
     if (orphans.length === 0) return;
     for (const cell of orphans) {
       cell.background = active;
@@ -643,6 +678,8 @@ export class HmiSeedService implements OnModuleInit {
       isMotion?: boolean;
       requiresSafeAction?: boolean;
       variableSpeed?: boolean;
+      /** STOP is plant-shared (no background) so screen delete cannot wipe it. */
+      plantShared?: boolean;
     };
 
     const cellDefs: CellDef[] = [
@@ -795,6 +832,8 @@ export class HmiSeedService implements OnModuleInit {
         style: 'estop',
         primary: eStop,
         requiresSafeAction: true,
+        // Plant-shared: not owned by one screen so delete/copy cannot wipe STOP.
+        plantShared: true,
       },
       {
         row: 5,
@@ -833,7 +872,7 @@ export class HmiSeedService implements OnModuleInit {
           variableSpeed: def.variableSpeed ?? false,
           slowSpeedPct: 30,
           fastSpeedPct: 100,
-          background: screen,
+          background: def.plantShared ? null : screen,
         }),
       );
     }

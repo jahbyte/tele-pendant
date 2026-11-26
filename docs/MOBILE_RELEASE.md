@@ -118,4 +118,4 @@ Release binaries embed `apps/mobile/certs/certificate.pem` so Expo Updates rejec
 | Keystores, `.p12`, provisioning profiles, OTA private key | **No** |
 | Vendor-provided signed installables at handover | **No** (secure transfer) |
 
-JavaScript-only updates still use [OTA.md](./OTA.md). Camera, speech, gesture-handler, or other native changes require a **new native build** using the scripts above. Holding Enable while tapping Listen needs `react-native-gesture-handler` ≥ 3.5.0 in the APK (OTA JS alone is not enough).
+JavaScript-only updates still use [OTA.md](./OTA.md). Camera, speech, or other native changes require a **new native build** using the scripts above. Operator uses per-cell Pressables so Enable + header Listen works in Expo Go and release builds (SDK 58 ships gesture-handler ~3.3.0).

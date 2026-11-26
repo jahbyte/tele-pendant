@@ -83,7 +83,7 @@ The lockfile also installs their dependencies. Those stay under the licence of e
 | react-native | 0.88.1 | MIT |
 | react-native-css-interop | 0.2.7 | MIT |
 | react-native-drawer-layout | 4.2.12 | MIT |
-| react-native-gesture-handler | 3.5.0 | MIT |
+| react-native-gesture-handler | 3.3.0 | MIT |
 | react-native-reanimated | 4.7.1 | MIT |
 | react-native-safe-area-context | 5.11.1 | MIT |
 | react-native-screens | 4.30.1 | MIT |

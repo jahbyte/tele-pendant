@@ -1825,6 +1825,7 @@ describe('HmiService', () => {
     };
     cells.createQueryBuilder = jest.fn(() => cellsQb);
     overlays.createQueryBuilder = jest.fn(() => overlaysQb);
+    cells.find.mockResolvedValue([]);
     backgrounds.findOneBy.mockResolvedValue(inactive);
     backgrounds.count.mockResolvedValue(2);
     backgrounds.remove.mockResolvedValue(inactive);
@@ -1874,6 +1875,50 @@ describe('HmiService', () => {
     await expect(service.deleteBackground('only')).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it('keeps shared STOP when deleting the screen that owned it', async () => {
+    const inactive = { id: 'bg-orig', name: 'demo-p03a21', active: false };
+    const stop = {
+      id: 'stop',
+      label: 'STOP',
+      style: 'estop',
+      requiresSafeAction: true,
+      background: { id: 'bg-orig' },
+      primaryRegister: { name: 'coil.eStop' },
+    };
+    const jog = {
+      id: 'jog',
+      label: 'OWVA up/down',
+      style: 'selector',
+      requiresSafeAction: false,
+      background: { id: 'bg-orig' },
+      primaryRegister: { name: 'coil.owvaUp' },
+    };
+    const cellsQb = {
+      delete: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const overlaysQb = {
+      delete: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 0 }),
+    };
+    cells.createQueryBuilder = jest.fn(() => cellsQb);
+    overlays.createQueryBuilder = jest.fn(() => overlaysQb);
+    cells.find.mockResolvedValue([stop, jog]);
+    cells.save.mockImplementation(async (row) => row);
+    backgrounds.findOneBy.mockResolvedValue(inactive);
+    backgrounds.count.mockResolvedValue(2);
+    backgrounds.remove.mockResolvedValue(inactive);
+    await expect(service.deleteBackground('bg-orig')).resolves.toEqual({
+      ok: true,
+    });
+    expect(cells.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'stop', background: null }),
+    );
+    expect(cellsQb.delete).toHaveBeenCalled();
   });
 
   it('loads and updates the screen named in the request', async () => {
